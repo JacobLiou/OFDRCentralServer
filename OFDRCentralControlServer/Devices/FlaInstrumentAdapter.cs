@@ -18,16 +18,22 @@ namespace OFDRCentralControlServer.Devices
 
         private readonly int _port; // 4300
 
+        private readonly string _zeroEnd;
+
+        private readonly string _scanEnd;
+
         private TcpClient? _client;
 
         private NetworkStream? _stream;
 
         private readonly ILogger Log = Serilog.Log.ForContext<FlaInstrumentAdapter>();
 
-        public FlaInstrumentAdapter(string host, int port)
+        public FlaInstrumentAdapter(string host, int port, double zeroEnd = 100.0, double scanEnd = 300.0)
         {
             _host = host;
             _port = port;
+            _zeroEnd = zeroEnd.ToString("F1");
+            _scanEnd = scanEnd.ToString("F1");
         }
 
         public async Task<bool> ConnectAsync(CancellationToken ct)
@@ -74,7 +80,7 @@ namespace OFDRCentralControlServer.Devices
             Log.Debug($" {nameof(AutoPeakMultiAsync)} ");
             var peaks = await AutoPeakMultiAsync(
                 start: Const.DEFAULT_START,
-                end: Const.ZERO_END,
+                end: _zeroEnd,
                 count: "2",
                 algo: Const.DEFAULT_ALGO,
                 width: Const.DEFAULT_WIDTH,
@@ -113,7 +119,7 @@ namespace OFDRCentralControlServer.Devices
             Log.Debug("ScanLengthAsync Begin");
             var peak = await AutoPeakMultiAsync(
                 start: zeroLength_m.ToString("F3"),
-                end: Const.MAX_END,
+                end: _scanEnd,
                 count: "2",
                 algo: Const.DEFAULT_ALGO,
                 width: Const.DEFAULT_WIDTH,

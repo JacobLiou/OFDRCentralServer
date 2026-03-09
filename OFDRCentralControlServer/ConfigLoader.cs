@@ -20,6 +20,16 @@ namespace OFDRCentralControlServer
         public int SwitchIndex { get; set; } = 1;
 
         public int SwitchInput { get; set; } = 1;
+
+        /// <summary>
+        /// 归零扫描最大长度（米），默认 100m
+        /// </summary>
+        public double ZeroEnd { get; set; } = 100.0;
+
+        /// <summary>
+        /// 测长扫描最大长度（米），默认 300m
+        /// </summary>
+        public double ScanEnd { get; set; } = 300.0;
     }
 
     public static class ConfigLoader
