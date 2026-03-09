@@ -74,7 +74,7 @@ namespace OFDRCentralControlServer.Devices
             Log.Debug($" {nameof(AutoPeakMultiAsync)} ");
             var peaks = await AutoPeakMultiAsync(
                 start: Const.DEFAULT_START,
-                end: Const.DEFAULT_END,
+                end: Const.ZERO_END,
                 count: "2",
                 algo: Const.DEFAULT_ALGO,
                 width: Const.DEFAULT_WIDTH,

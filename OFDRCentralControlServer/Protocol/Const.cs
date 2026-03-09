@@ -1,4 +1,4 @@
-﻿namespace OFDRCentralControlServer.Protocol
+namespace OFDRCentralControlServer.Protocol
 {
     public static class Const
     {
@@ -6,6 +6,8 @@
         public const string DEFAULT_START = "0.0";
 
         public const string DEFAULT_END = "30.0";
+
+        public const string ZERO_END = "100.0";
 
         public const string MAX_END = "300.0";
 
