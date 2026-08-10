@@ -50,6 +50,21 @@ namespace OFDRCentralControlServer
         /// 扫描在 nth-peak 策略下使用的峰序（1-based）
         /// </summary>
         public int ScanPeakSelectionOrdinal { get; set; } = 1;
+
+        /// <summary>
+        /// 预测式扫描补测次数，仅在 scan 选峰策略为 scored-candidate 时生效。
+        /// </summary>
+        public int ScanPredictiveRetestCount { get; set; } = 1;
+
+        /// <summary>
+        /// 与最近一次成功 scan 的长度差超过该值时，触发低置信度判断（米）。
+        /// </summary>
+        public double ScanPredictiveHistoryJumpThresholdM { get; set; } = 25.0;
+
+        /// <summary>
+        /// 两次预测扫描结果若落在该误差内，则认为补测已收敛（米）。
+        /// </summary>
+        public double ScanPredictiveConvergenceToleranceM { get; set; } = 2.0;
     }
 
     public static class ConfigLoader

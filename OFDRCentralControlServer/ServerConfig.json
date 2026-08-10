@@ -18,5 +18,9 @@
   "ZeroPeakSelectionOrdinal": 3,
 
   "ScanPeakSelectionStrategy": "last-peak",
-  "ScanPeakSelectionOrdinal": 1
+  "ScanPeakSelectionOrdinal": 1,
+
+  "ScanPredictiveRetestCount": 1,
+  "ScanPredictiveHistoryJumpThresholdM": 25.0,
+  "ScanPredictiveConvergenceToleranceM": 2.0
 }

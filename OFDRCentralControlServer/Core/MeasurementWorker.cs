@@ -40,14 +40,36 @@ namespace OFDRCentralControlServer.Core
 
         private static readonly TimeSpan BASE_DELAY_MEASURE = TimeSpan.FromMilliseconds(300);
 
+        private readonly string _scanPeakSelectionStrategy;
+
+        private readonly int _scanPredictiveRetestCount;
+
+        private readonly double _scanPredictiveHistoryJumpThresholdM;
+
+        private readonly double _scanPredictiveConvergenceToleranceM;
+
         private readonly ILogger Log = Serilog.Log.ForContext<MeasurementWorker>();
 
-        public MeasurementWorker(Channel<MeasureTask> queue, TcpServer server, FlaInstrumentAdapter adapter, OpticalSwitchController sw)
+        public MeasurementWorker(
+            Channel<MeasureTask> queue,
+            TcpServer server,
+            FlaInstrumentAdapter adapter,
+            OpticalSwitchController sw,
+            string? scanPeakSelectionStrategy = null,
+            int scanPredictiveRetestCount = 1,
+            double scanPredictiveHistoryJumpThresholdM = 25.0,
+            double scanPredictiveConvergenceToleranceM = 2.0)
         {
             _queue = queue;
             _server = server;
             _fla = adapter;
             _switch = sw;
+            _scanPeakSelectionStrategy = string.IsNullOrWhiteSpace(scanPeakSelectionStrategy)
+                ? "last-peak"
+                : scanPeakSelectionStrategy.Trim().ToLowerInvariant();
+            _scanPredictiveRetestCount = Math.Max(0, scanPredictiveRetestCount);
+            _scanPredictiveHistoryJumpThresholdM = Math.Max(0.5, scanPredictiveHistoryJumpThresholdM);
+            _scanPredictiveConvergenceToleranceM = Math.Max(0.1, scanPredictiveConvergenceToleranceM);
         }
 
         public async Task StartAsync(CancellationToken ct)
@@ -96,34 +118,36 @@ namespace OFDRCentralControlServer.Core
                     {
                         double zero_length = ParseDouble(task.Params.GetValueOrDefault("zero_length", "5"), 5);
 
-                        // SCAN —— 带重试（如果设备忙或网络瞬断）
-                        var res = await RetryAsync(
-                            async () => await _fla.ScanLengthAsync(zero_length, ct),
-                            "scan",
-                            RETRY_MEASURE_MAX,
-                            BASE_DELAY_MEASURE,
-                            ct,
-                            Log
-                        );
+                        var scanOutcome = _scanPeakSelectionStrategy.Equals("scored-candidate", StringComparison.OrdinalIgnoreCase)
+                            ? await ExecutePredictiveScanAsync(task.ClientId, zero_length, ct)
+                            : await ExecuteFixedStrategyScanAsync(zero_length, ct);
 
-                        if (res.Scan_Len > 0)
+                        if (scanOutcome.Success)
                         {
                             data = new
                             {
                                 clientId = task.ClientId,
                                 mode = task.Mode,
-                                length_m = res.Scan_Len,
-                                peak_db = res.Scan_Db
+                                length_m = scanOutcome.LengthM,
+                                peak_db = scanOutcome.PeakDb
                             };
                             result = new ResultMessage("result", task.TaskId, status: ResultStatus.success.ToString(), data: data, error: null);
+                            HourlyResultStore.Instance.RecordSuccessfulMeasurement(task.ClientId, task.Mode, scanOutcome.LengthM, scanOutcome.PeakDb);
                         }
                         else
                         {
-                            result = new ResultMessage("result", task.TaskId, status: ResultStatus.failed.ToString(), data: null, error: "FLA scan error reuslt < 0");
+                            result = new ResultMessage("result", task.TaskId, status: ResultStatus.failed.ToString(), data: null, error: scanOutcome.Error ?? "FLA scan error reuslt < 0");
                         }
 
                         Log.Debug(JsonSerializer.Serialize(result));
-                        Log.Information("FLA scan done for task {TaskId}: scan_data={Res}", task.TaskId, res);
+                        Log.Information(
+                            "FLA scan done for task {TaskId}: length_m={Length} peak_db={PeakDb} attempts={Attempts} success={Success} error={Error}",
+                            task.TaskId,
+                            scanOutcome.LengthM,
+                            scanOutcome.PeakDb,
+                            scanOutcome.Attempts,
+                            scanOutcome.Success,
+                            scanOutcome.Error);
                     }
                     else if (task.Mode.Equals("zero", StringComparison.OrdinalIgnoreCase))
                     {
@@ -155,6 +179,10 @@ namespace OFDRCentralControlServer.Core
 
                         Log.Debug(JsonSerializer.Serialize(result));
                         Log.Information("FLA zero done for task {TaskId}: zero_data={Zero}", task.TaskId, zero); ;
+                        if (zero.Zero_Len > 0)
+                        {
+                            HourlyResultStore.Instance.RecordSuccessfulMeasurement(task.ClientId, task.Mode, zero.Zero_Len, zero.Zero_Db);
+                        }
                     }
                     else
                     {
@@ -299,7 +327,173 @@ namespace OFDRCentralControlServer.Core
             }
         }
 
+        private async Task<ScanExecutionOutcome> ExecuteFixedStrategyScanAsync(double zeroLength, CancellationToken ct)
+        {
+            var res = await RetryAsync(
+                async () => await _fla.ScanLengthAsync(zeroLength, ct),
+                "scan",
+                RETRY_MEASURE_MAX,
+                BASE_DELAY_MEASURE,
+                ct,
+                Log
+            );
+
+            if (res.Scan_Len > 0)
+            {
+                return new ScanExecutionOutcome(true, res.Scan_Len, res.Scan_Db, null, 1);
+            }
+
+            return new ScanExecutionOutcome(false, res.Scan_Len, res.Scan_Db, "FLA scan error reuslt < 0", 1);
+        }
+
+        private async Task<ScanExecutionOutcome> ExecutePredictiveScanAsync(int clientId, double zeroLength, CancellationToken ct)
+        {
+            HourlyResultStore.Instance.TryGetLastScanHistory(clientId, out var lastScanHistory);
+
+            ScanAttemptEvaluation? previousAttempt = null;
+            var totalAttempts = 1 + _scanPredictiveRetestCount;
+
+            for (var attempt = 1; attempt <= totalAttempts; attempt++)
+            {
+                var candidateSet = await RetryAsync(
+                    async () => await _fla.GetScanCandidateSetAsync(zeroLength, ct)
+                        ?? throw new InvalidOperationException("FLA scan returned no candidate set."),
+                    "scan-candidates",
+                    RETRY_MEASURE_MAX,
+                    BASE_DELAY_MEASURE,
+                    ct,
+                    Log
+                );
+
+                var evaluation = EvaluateScanCandidates(candidateSet, lastScanHistory);
+
+                Log.Information(
+                    "Predictive scan attempt {Attempt}/{TotalAttempts}: clientId={ClientId} bestDelta={BestDelta} bestDb={BestDb} bestScore={BestScore} margin={ScoreMargin} lowConfidence={LowConfidence} historyJump={HistoryJump} positiveCandidates={PositiveCandidates}",
+                    attempt,
+                    totalAttempts,
+                    clientId,
+                    evaluation.Best.Candidate.DeltaFromZero,
+                    evaluation.Best.Candidate.Db,
+                    evaluation.Best.Score,
+                    evaluation.ScoreMargin,
+                    evaluation.IsLowConfidence,
+                    evaluation.TriggeredByHistoryJump,
+                    evaluation.PositiveCandidateCount
+                );
+
+                if (!evaluation.IsLowConfidence)
+                {
+                    return new ScanExecutionOutcome(true, evaluation.Best.Candidate.DeltaFromZero, evaluation.Best.Candidate.Db, null, attempt);
+                }
+
+                if (previousAttempt != null
+                    && Math.Abs(previousAttempt.Best.Candidate.DeltaFromZero - evaluation.Best.Candidate.DeltaFromZero) <= _scanPredictiveConvergenceToleranceM)
+                {
+                    Log.Warning(
+                        "Predictive scan accepted after convergence: clientId={ClientId} previousDelta={PreviousDelta} currentDelta={CurrentDelta} tolerance={Tolerance}",
+                        clientId,
+                        previousAttempt.Best.Candidate.DeltaFromZero,
+                        evaluation.Best.Candidate.DeltaFromZero,
+                        _scanPredictiveConvergenceToleranceM
+                    );
+
+                    return new ScanExecutionOutcome(true, evaluation.Best.Candidate.DeltaFromZero, evaluation.Best.Candidate.Db, null, attempt);
+                }
+
+                previousAttempt = evaluation;
+            }
+
+            var reason = previousAttempt == null
+                ? "Predictive scan did not produce usable candidates"
+                : $"Predictive scan low confidence: bestDelta={previousAttempt.Best.Candidate.DeltaFromZero:F3}, margin={previousAttempt.ScoreMargin:F2}, historyJump={previousAttempt.TriggeredByHistoryJump}";
+
+            return new ScanExecutionOutcome(
+                false,
+                previousAttempt?.Best.Candidate.DeltaFromZero ?? -1d,
+                previousAttempt?.Best.Candidate.Db ?? 0d,
+                reason,
+                totalAttempts);
+        }
+
+        private ScanAttemptEvaluation EvaluateScanCandidates(ScanCandidateSet candidateSet, ClientMeasurementHistory? lastScanHistory)
+        {
+            var positiveCandidates = candidateSet.Candidates
+                .Where(static candidate => candidate.DeltaFromZero > 0)
+                .ToArray();
+
+            if (positiveCandidates.Length == 0)
+            {
+                throw new InvalidOperationException("Predictive scan found no positive-delta candidates.");
+            }
+
+            var minDb = positiveCandidates.Min(static candidate => candidate.Db);
+            var maxDb = positiveCandidates.Max(static candidate => candidate.Db);
+
+            var scoredCandidates = positiveCandidates
+                .Select(candidate => ScoreCandidate(candidate, lastScanHistory, minDb, maxDb))
+                .OrderByDescending(static scored => scored.Score)
+                .ToArray();
+
+            var best = scoredCandidates[0];
+            var runnerUp = scoredCandidates.Length > 1 ? scoredCandidates[1] : null;
+            var scoreMargin = runnerUp == null ? 100d : best.Score - runnerUp.Score;
+            var candidateSpread = positiveCandidates.Max(static candidate => candidate.DeltaFromZero)
+                - positiveCandidates.Min(static candidate => candidate.DeltaFromZero);
+            var historyJump = lastScanHistory != null
+                && Math.Abs(best.Candidate.DeltaFromZero - lastScanHistory.LengthM) > _scanPredictiveHistoryJumpThresholdM;
+            var noHistoryWideSpread = lastScanHistory == null
+                && positiveCandidates.Length > 1
+                && candidateSpread > _scanPredictiveHistoryJumpThresholdM
+                && scoreMargin < 12d;
+            var isLowConfidence = scoreMargin < 8d || historyJump || noHistoryWideSpread;
+
+            return new ScanAttemptEvaluation(best, runnerUp, positiveCandidates.Length, isLowConfidence, historyJump, scoreMargin, candidateSpread);
+        }
+
+        private static ScoredPeakCandidate ScoreCandidate(
+            PeakCandidate candidate,
+            ClientMeasurementHistory? lastScanHistory,
+            double minDb,
+            double maxDb)
+        {
+            var score = 0d;
+            var historyDistance = lastScanHistory == null
+                ? double.NaN
+                : Math.Abs(candidate.DeltaFromZero - lastScanHistory.LengthM);
+
+            if (lastScanHistory != null)
+            {
+                score += Math.Max(0d, 120d - historyDistance * 8d);
+            }
+            else
+            {
+                score += Math.Max(0d, 30d - candidate.DeltaFromZero * 0.12d);
+            }
+
+            score += 10d / (1d + candidate.DeltaFromZero);
+
+            var dbNormalized = Math.Abs(maxDb - minDb) < 0.001d
+                ? 0.5d
+                : (candidate.Db - minDb) / (maxDb - minDb);
+            score += dbNormalized * 25d;
+
+            return new ScoredPeakCandidate(candidate, score, dbNormalized, historyDistance);
+        }
+
         private static double ParseDouble(string s, double def)
             => double.TryParse(s, out var v) ? v : def;
+
+        private sealed record ScanExecutionOutcome(bool Success, double LengthM, double PeakDb, string? Error, int Attempts);
+
+        private sealed record ScoredPeakCandidate(PeakCandidate Candidate, double Score, double DbNormalized, double HistoryDistance);
+
+        private sealed record ScanAttemptEvaluation(
+            ScoredPeakCandidate Best,
+            ScoredPeakCandidate? RunnerUp,
+            int PositiveCandidateCount,
+            bool IsLowConfidence,
+            bool TriggeredByHistoryJump,
+            double ScoreMargin,
+            double CandidateSpread);
     }
 }

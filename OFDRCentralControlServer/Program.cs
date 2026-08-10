@@ -91,7 +91,16 @@ try
             return;
         }
 
-        var worker = new MeasurementWorker(queue, server, adapter, sw);
+        var worker = new MeasurementWorker(
+            queue,
+            server,
+            adapter,
+            sw,
+            cfg.ScanPeakSelectionStrategy,
+            cfg.ScanPredictiveRetestCount,
+            cfg.ScanPredictiveHistoryJumpThresholdM,
+            cfg.ScanPredictiveConvergenceToleranceM
+        );
         serverTask = server.StartAsync(cts.Token);
         workerTask = worker.StartAsync(cts.Token);
     }

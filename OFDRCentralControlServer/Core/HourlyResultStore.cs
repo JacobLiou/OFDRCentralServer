@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Caching.Memory;
+using OFDRCentralControlServer.Models;
 using Serilog;
 using System.Collections.Concurrent;
 
@@ -15,6 +16,8 @@ namespace OFDRCentralControlServer.Core
 
         private readonly MemoryCache _cache;
         private readonly ConcurrentDictionary<string, byte> _keys = new();
+        private readonly ConcurrentDictionary<int, ClientMeasurementHistory> _lastScanByClient = new();
+        private readonly ConcurrentDictionary<int, ClientMeasurementHistory> _lastZeroByClient = new();
 
         // retention period for results (default 1 hour)
         private TimeSpan _retention = TimeSpan.FromHours(1);
@@ -131,6 +134,58 @@ namespace OFDRCentralControlServer.Core
             return removed;
         }
 
+        public void RecordSuccessfulMeasurement(int clientId, string mode, double lengthM, double peakDb)
+        {
+            if (clientId <= 0 || string.IsNullOrWhiteSpace(mode))
+            {
+                return;
+            }
+
+            var history = new ClientMeasurementHistory(clientId, mode, lengthM, peakDb, DateTime.UtcNow);
+            if (mode.Equals("scan", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastScanByClient[clientId] = history;
+            }
+            else if (mode.Equals("zero", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastZeroByClient[clientId] = history;
+            }
+        }
+
+        public bool TryGetLastScanHistory(int clientId, out ClientMeasurementHistory? history)
+        {
+            history = null;
+            if (clientId <= 0)
+            {
+                return false;
+            }
+
+            if (_lastScanByClient.TryGetValue(clientId, out var value))
+            {
+                history = value;
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool TryGetLastZeroHistory(int clientId, out ClientMeasurementHistory? history)
+        {
+            history = null;
+            if (clientId <= 0)
+            {
+                return false;
+            }
+
+            if (_lastZeroByClient.TryGetValue(clientId, out var value))
+            {
+                history = value;
+                return true;
+            }
+
+            return false;
+        }
+
         /// <summary>当前总项数（监控用途，近似值）。</summary>
         public int Count => _keys.Count;
 
@@ -181,6 +236,8 @@ namespace OFDRCentralControlServer.Core
             try { _cache.Dispose(); } catch { }
             try { _logTimer?.Dispose(); } catch { }
             _keys.Clear();
+            _lastScanByClient.Clear();
+            _lastZeroByClient.Clear();
         }
     }
 }

@@ -4,6 +4,7 @@ using System.Buffers;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using OFDRCentralControlServer.Models;
 
 namespace OFDRCentralControlServer.Devices
 {
@@ -163,36 +164,22 @@ namespace OFDRCentralControlServer.Devices
             CancellationToken ct
         )
         {
-            Log.Debug("ScanLengthAsync Begin");
-            var peak = await AutoPeakMultiAsync(
-                start: zeroLength_m.ToString("F3"),
-                end: _scanEnd,
-                count: "2",
-                algo: Const.DEFAULT_ALGO,
-                width: Const.DEFAULT_WIDTH,
-                thr: Const.DEFAULT_THRESHOLD,
-                id: Const.DEFAULT_ID,
-                sn: Const.DEFAULT_SN,
-                ct: ct
-            );
-
-            Log.Debug($"ScanLengthAsync End");
-            if (peak == null || peak.PeakPositions == null || peak.PeakPositions.Count == 0
-                || peak.PeakDbs == null || peak.PeakDbs.Count == 0)
+            var candidateSet = await GetScanCandidateSetAsync(zeroLength_m, ct);
+            if (candidateSet == null || candidateSet.Candidates.Count == 0)
             {
                 return (-1d, 0d);
             }
 
             // 代表产品端点的峰：采用距离最大（如需按 dB 选择，可改成幅值最大）
             var selectedIndex = SelectPeakIndex(
-                peak.PeakPositions,
-                peak.PeakDbs,
+                candidateSet.Candidates,
                 _scanPeakSelectionStrategy,
                 _scanPeakSelectionOrdinal,
                 context: "scan");
-            var selectedPos = peak.PeakPositions[selectedIndex];
-            var productLen = selectedPos - zeroLength_m;
-            var productDb = peak.PeakDbs[selectedIndex];
+            var selectedCandidate = candidateSet.Candidates[selectedIndex];
+            var selectedPos = selectedCandidate.Position;
+            var productLen = selectedCandidate.DeltaFromZero;
+            var productDb = selectedCandidate.Db;
 
             Log.Information(
                 "FLA scan peak selection: strategy={Strategy} zeroLength={ZeroLength} selectedIndex={SelectedIndex} selectedPos={SelectedPos} selectedDb={SelectedDb} delta={Delta} positionsCount={PositionsCount} dbCount={DbCount}",
@@ -202,16 +189,16 @@ namespace OFDRCentralControlServer.Devices
                 selectedPos,
                 productDb,
                 productLen,
-                peak.PeakPositions.Count,
-                peak.PeakDbs.Count
+                candidateSet.RawPositionsCount,
+                candidateSet.RawDbCount
             );
 
             Log.Debug(
                 "FLA scan peaks detail: positionsHead={PositionsHead} positionsTail={PositionsTail} dbHead={DbHead} dbTail={DbTail}",
-                SummarizePeakValues(peak.PeakPositions, takeFromTail: false),
-                SummarizePeakValues(peak.PeakPositions, takeFromTail: true),
-                SummarizePeakValues(peak.PeakDbs, takeFromTail: false),
-                SummarizePeakValues(peak.PeakDbs, takeFromTail: true)
+                SummarizePeakValues(candidateSet.Candidates.Select(static candidate => candidate.Position).ToArray(), takeFromTail: false),
+                SummarizePeakValues(candidateSet.Candidates.Select(static candidate => candidate.Position).ToArray(), takeFromTail: true),
+                SummarizePeakValues(candidateSet.Candidates.Select(static candidate => candidate.Db).ToArray(), takeFromTail: false),
+                SummarizePeakValues(candidateSet.Candidates.Select(static candidate => candidate.Db).ToArray(), takeFromTail: true)
             );
 
             if (productLen <= 0)
@@ -225,6 +212,41 @@ namespace OFDRCentralControlServer.Devices
             }
 
             return (productLen, productDb);
+        }
+
+        public async Task<ScanCandidateSet?> GetScanCandidateSetAsync(double zeroLength_m, CancellationToken ct)
+        {
+            Log.Debug("GetScanCandidateSetAsync Begin");
+            var peak = await AutoPeakMultiAsync(
+                start: zeroLength_m.ToString("F3"),
+                end: _scanEnd,
+                count: "2",
+                algo: Const.DEFAULT_ALGO,
+                width: Const.DEFAULT_WIDTH,
+                thr: Const.DEFAULT_THRESHOLD,
+                id: Const.DEFAULT_ID,
+                sn: Const.DEFAULT_SN,
+                ct: ct
+            );
+
+            Log.Debug("GetScanCandidateSetAsync End");
+            if (peak == null || peak.PeakPositions == null || peak.PeakPositions.Count == 0
+                || peak.PeakDbs == null || peak.PeakDbs.Count == 0)
+            {
+                return null;
+            }
+
+            var candidates = BuildCandidates(peak.PeakPositions, peak.PeakDbs, zeroLength_m);
+            Log.Information(
+                "FLA scan candidate set: zeroLength={ZeroLength} candidateCount={CandidateCount} positiveCandidateCount={PositiveCandidateCount} rawPositionsCount={RawPositionsCount} rawDbCount={RawDbCount}",
+                zeroLength_m,
+                candidates.Count,
+                candidates.Count(static candidate => candidate.DeltaFromZero > 0),
+                peak.PeakPositions.Count,
+                peak.PeakDbs.Count
+            );
+
+            return new ScanCandidateSet(zeroLength_m, candidates, peak.PeakPositions.Count, peak.PeakDbs.Count);
         }
 
         // 发送 SCAN 并读取数据
@@ -394,6 +416,26 @@ namespace OFDRCentralControlServer.Devices
             };
         }
 
+        private int SelectPeakIndex(
+            IReadOnlyList<PeakCandidate> candidates,
+            string strategy,
+            int ordinal,
+            string context)
+        {
+            if (candidates.Count == 0)
+            {
+                throw new InvalidOperationException($"No candidates available for {context} peak selection.");
+            }
+
+            return strategy switch
+            {
+                "first-peak" => 0,
+                "nth-peak" => Math.Min(candidates.Count - 1, Math.Max(0, ordinal - 1)),
+                "strongest-db" => SelectStrongestDbIndex(candidates),
+                _ => candidates.Count - 1,
+            };
+        }
+
         private static int SelectStrongestDbIndex(IReadOnlyList<double> dbs, int pairCount)
         {
             var bestIndex = 0;
@@ -411,6 +453,40 @@ namespace OFDRCentralControlServer.Devices
             return bestIndex;
         }
 
+        private static int SelectStrongestDbIndex(IReadOnlyList<PeakCandidate> candidates)
+        {
+            var bestIndex = 0;
+            var bestDb = candidates[0].Db;
+
+            for (var index = 1; index < candidates.Count; index++)
+            {
+                if (candidates[index].Db > bestDb)
+                {
+                    bestDb = candidates[index].Db;
+                    bestIndex = index;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static IReadOnlyList<PeakCandidate> BuildCandidates(
+            IReadOnlyList<double> positions,
+            IReadOnlyList<double> dbs,
+            double zeroLength)
+        {
+            var pairCount = Math.Min(positions.Count, dbs.Count);
+            var candidates = new List<PeakCandidate>(pairCount);
+
+            for (var index = 0; index < pairCount; index++)
+            {
+                var position = positions[index];
+                candidates.Add(new PeakCandidate(index, position, dbs[index], position - zeroLength));
+            }
+
+            return candidates;
+        }
+
         private static string NormalizePeakSelectionStrategy(string? strategy, string fallback)
         {
             if (string.IsNullOrWhiteSpace(strategy))
@@ -426,6 +502,8 @@ namespace OFDRCentralControlServer.Devices
                 "last-peak" => "last-peak",
                 "nth" => "nth-peak",
                 "nth-peak" => "nth-peak",
+                "scored" => "scored-candidate",
+                "scored-candidate" => "scored-candidate",
                 "strongest" => "strongest-db",
                 "strongest-db" => "strongest-db",
                 _ => fallback,
