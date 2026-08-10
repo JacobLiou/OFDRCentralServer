@@ -99,7 +99,8 @@ try
             cfg.ScanPeakSelectionStrategy,
             cfg.ScanPredictiveRetestCount,
             cfg.ScanPredictiveHistoryJumpThresholdM,
-            cfg.ScanPredictiveConvergenceToleranceM
+            cfg.ScanPredictiveConvergenceToleranceM,
+            cfg.ScanPredictiveTailPreferenceWeight
         );
         serverTask = server.StartAsync(cts.Token);
         workerTask = worker.StartAsync(cts.Token);

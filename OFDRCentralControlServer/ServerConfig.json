@@ -22,5 +22,6 @@
 
   "ScanPredictiveRetestCount": 1,
   "ScanPredictiveHistoryJumpThresholdM": 25.0,
-  "ScanPredictiveConvergenceToleranceM": 2.0
+  "ScanPredictiveConvergenceToleranceM": 2.0,
+  "ScanPredictiveTailPreferenceWeight": 12.0
 }

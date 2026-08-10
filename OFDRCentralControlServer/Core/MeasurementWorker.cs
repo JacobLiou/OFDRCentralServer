@@ -48,6 +48,8 @@ namespace OFDRCentralControlServer.Core
 
         private readonly double _scanPredictiveConvergenceToleranceM;
 
+        private readonly double _scanPredictiveTailPreferenceWeight;
+
         private readonly ILogger Log = Serilog.Log.ForContext<MeasurementWorker>();
 
         public MeasurementWorker(
@@ -58,7 +60,8 @@ namespace OFDRCentralControlServer.Core
             string? scanPeakSelectionStrategy = null,
             int scanPredictiveRetestCount = 1,
             double scanPredictiveHistoryJumpThresholdM = 25.0,
-            double scanPredictiveConvergenceToleranceM = 2.0)
+            double scanPredictiveConvergenceToleranceM = 2.0,
+            double scanPredictiveTailPreferenceWeight = 12.0)
         {
             _queue = queue;
             _server = server;
@@ -70,6 +73,7 @@ namespace OFDRCentralControlServer.Core
             _scanPredictiveRetestCount = Math.Max(0, scanPredictiveRetestCount);
             _scanPredictiveHistoryJumpThresholdM = Math.Max(0.5, scanPredictiveHistoryJumpThresholdM);
             _scanPredictiveConvergenceToleranceM = Math.Max(0.1, scanPredictiveConvergenceToleranceM);
+            _scanPredictiveTailPreferenceWeight = Math.Max(0, scanPredictiveTailPreferenceWeight);
         }
 
         public async Task StartAsync(CancellationToken ct)
@@ -350,7 +354,7 @@ namespace OFDRCentralControlServer.Core
         {
             HourlyResultStore.Instance.TryGetLastScanHistory(clientId, out var lastScanHistory);
 
-            ScanAttemptEvaluation? previousAttempt = null;
+            PredictiveScanEvaluation? previousAttempt = null;
             var totalAttempts = 1 + _scanPredictiveRetestCount;
 
             for (var attempt = 1; attempt <= totalAttempts; attempt++)
@@ -365,7 +369,7 @@ namespace OFDRCentralControlServer.Core
                     Log
                 );
 
-                var evaluation = EvaluateScanCandidates(candidateSet, lastScanHistory);
+                var evaluation = PredictiveScanSelector.EvaluateCandidates(candidateSet, lastScanHistory, BuildPredictiveScanOptions());
 
                 Log.Information(
                     "Predictive scan attempt {Attempt}/{TotalAttempts}: clientId={ClientId} bestDelta={BestDelta} bestDb={BestDb} bestScore={BestScore} margin={ScoreMargin} lowConfidence={LowConfidence} historyJump={HistoryJump} positiveCandidates={PositiveCandidates}",
@@ -415,85 +419,19 @@ namespace OFDRCentralControlServer.Core
                 totalAttempts);
         }
 
-        private ScanAttemptEvaluation EvaluateScanCandidates(ScanCandidateSet candidateSet, ClientMeasurementHistory? lastScanHistory)
-        {
-            var positiveCandidates = candidateSet.Candidates
-                .Where(static candidate => candidate.DeltaFromZero > 0)
-                .ToArray();
-
-            if (positiveCandidates.Length == 0)
-            {
-                throw new InvalidOperationException("Predictive scan found no positive-delta candidates.");
-            }
-
-            var minDb = positiveCandidates.Min(static candidate => candidate.Db);
-            var maxDb = positiveCandidates.Max(static candidate => candidate.Db);
-
-            var scoredCandidates = positiveCandidates
-                .Select(candidate => ScoreCandidate(candidate, lastScanHistory, minDb, maxDb))
-                .OrderByDescending(static scored => scored.Score)
-                .ToArray();
-
-            var best = scoredCandidates[0];
-            var runnerUp = scoredCandidates.Length > 1 ? scoredCandidates[1] : null;
-            var scoreMargin = runnerUp == null ? 100d : best.Score - runnerUp.Score;
-            var candidateSpread = positiveCandidates.Max(static candidate => candidate.DeltaFromZero)
-                - positiveCandidates.Min(static candidate => candidate.DeltaFromZero);
-            var historyJump = lastScanHistory != null
-                && Math.Abs(best.Candidate.DeltaFromZero - lastScanHistory.LengthM) > _scanPredictiveHistoryJumpThresholdM;
-            var noHistoryWideSpread = lastScanHistory == null
-                && positiveCandidates.Length > 1
-                && candidateSpread > _scanPredictiveHistoryJumpThresholdM
-                && scoreMargin < 12d;
-            var isLowConfidence = scoreMargin < 8d || historyJump || noHistoryWideSpread;
-
-            return new ScanAttemptEvaluation(best, runnerUp, positiveCandidates.Length, isLowConfidence, historyJump, scoreMargin, candidateSpread);
-        }
-
-        private static ScoredPeakCandidate ScoreCandidate(
-            PeakCandidate candidate,
-            ClientMeasurementHistory? lastScanHistory,
-            double minDb,
-            double maxDb)
-        {
-            var score = 0d;
-            var historyDistance = lastScanHistory == null
-                ? double.NaN
-                : Math.Abs(candidate.DeltaFromZero - lastScanHistory.LengthM);
-
-            if (lastScanHistory != null)
-            {
-                score += Math.Max(0d, 120d - historyDistance * 8d);
-            }
-            else
-            {
-                score += Math.Max(0d, 30d - candidate.DeltaFromZero * 0.12d);
-            }
-
-            score += 10d / (1d + candidate.DeltaFromZero);
-
-            var dbNormalized = Math.Abs(maxDb - minDb) < 0.001d
-                ? 0.5d
-                : (candidate.Db - minDb) / (maxDb - minDb);
-            score += dbNormalized * 25d;
-
-            return new ScoredPeakCandidate(candidate, score, dbNormalized, historyDistance);
-        }
+        private PredictiveScanOptions BuildPredictiveScanOptions()
+            => new(
+                _scanPredictiveHistoryJumpThresholdM,
+                _scanPredictiveConvergenceToleranceM,
+                _scanPredictiveTailPreferenceWeight,
+                8d,
+                _scanPredictiveHistoryJumpThresholdM,
+                12d);
 
         private static double ParseDouble(string s, double def)
             => double.TryParse(s, out var v) ? v : def;
 
         private sealed record ScanExecutionOutcome(bool Success, double LengthM, double PeakDb, string? Error, int Attempts);
 
-        private sealed record ScoredPeakCandidate(PeakCandidate Candidate, double Score, double DbNormalized, double HistoryDistance);
-
-        private sealed record ScanAttemptEvaluation(
-            ScoredPeakCandidate Best,
-            ScoredPeakCandidate? RunnerUp,
-            int PositiveCandidateCount,
-            bool IsLowConfidence,
-            bool TriggeredByHistoryJump,
-            double ScoreMargin,
-            double CandidateSpread);
     }
 }

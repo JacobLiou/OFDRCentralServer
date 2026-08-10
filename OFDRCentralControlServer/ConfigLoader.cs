@@ -65,6 +65,11 @@ namespace OFDRCentralControlServer
         /// 两次预测扫描结果若落在该误差内，则认为补测已收敛（米）。
         /// </summary>
         public double ScanPredictiveConvergenceToleranceM { get; set; } = 2.0;
+
+        /// <summary>
+        /// 预测式扫描中对尾峰的附加偏好权重；保留历史 last-peak 经验，但不再写死。
+        /// </summary>
+        public double ScanPredictiveTailPreferenceWeight { get; set; } = 12.0;
     }
 
     public static class ConfigLoader

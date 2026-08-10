@@ -42,4 +42,10 @@
 		</None>
 	</ItemGroup>
 
+	<ItemGroup>
+		<Compile Remove="OFDRCentralControlServer.Tests\**\*.cs" />
+		<EmbeddedResource Remove="OFDRCentralControlServer.Tests\**\*" />
+		<None Remove="OFDRCentralControlServer.Tests\**\*" />
+	</ItemGroup>
+
 </Project>
