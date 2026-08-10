@@ -95,7 +95,29 @@ namespace OFDRCentralControlServer.Devices
             if (peaks != null && peaks.PeakPositions != null && peaks.PeakPositions.Count != 0
                 && peaks.PeakDbs != null && peaks.PeakDbs.Count != 0)
             {
-                return (peaks.PeakPositions.Last(), peaks.PeakDbs.Last());
+                var selectedIndex = peaks.PeakPositions.Count - 1;
+                var selectedPos = peaks.PeakPositions[selectedIndex];
+                var selectedDb = peaks.PeakDbs.Last();
+
+                Log.Information(
+                    "FLA zero peak selection: strategy={Strategy} selectedIndex={SelectedIndex} selectedPos={SelectedPos} selectedDb={SelectedDb} positionsCount={PositionsCount} dbCount={DbCount}",
+                    "last-peak",
+                    selectedIndex,
+                    selectedPos,
+                    selectedDb,
+                    peaks.PeakPositions.Count,
+                    peaks.PeakDbs.Count
+                );
+
+                Log.Debug(
+                    "FLA zero peaks detail: positionsHead={PositionsHead} positionsTail={PositionsTail} dbHead={DbHead} dbTail={DbTail}",
+                    SummarizePeakValues(peaks.PeakPositions, takeFromTail: false),
+                    SummarizePeakValues(peaks.PeakPositions, takeFromTail: true),
+                    SummarizePeakValues(peaks.PeakDbs, takeFromTail: false),
+                    SummarizePeakValues(peaks.PeakDbs, takeFromTail: true)
+                );
+
+                return (selectedPos, selectedDb);
             }
 
             return (-1d, 0d);
@@ -130,14 +152,48 @@ namespace OFDRCentralControlServer.Devices
             );
 
             Log.Debug($"ScanLengthAsync End");
-            if (peak == null || peak.PeakPositions == null || peak.PeakPositions.Count == 0)
+            if (peak == null || peak.PeakPositions == null || peak.PeakPositions.Count == 0
+                || peak.PeakDbs == null || peak.PeakDbs.Count == 0)
             {
                 return (-1d, 0d);
             }
 
             // 代表产品端点的峰：采用距离最大（如需按 dB 选择，可改成幅值最大）
-            var productLen = peak.PeakPositions.Last() - zeroLength_m;
+            var selectedIndex = peak.PeakPositions.Count - 1;
+            var selectedPos = peak.PeakPositions[selectedIndex];
+            var productLen = selectedPos - zeroLength_m;
             var productDb = peak.PeakDbs!.Last();
+
+            Log.Information(
+                "FLA scan peak selection: strategy={Strategy} zeroLength={ZeroLength} selectedIndex={SelectedIndex} selectedPos={SelectedPos} selectedDb={SelectedDb} delta={Delta} positionsCount={PositionsCount} dbCount={DbCount}",
+                "last-peak",
+                zeroLength_m,
+                selectedIndex,
+                selectedPos,
+                productDb,
+                productLen,
+                peak.PeakPositions.Count,
+                peak.PeakDbs.Count
+            );
+
+            Log.Debug(
+                "FLA scan peaks detail: positionsHead={PositionsHead} positionsTail={PositionsTail} dbHead={DbHead} dbTail={DbTail}",
+                SummarizePeakValues(peak.PeakPositions, takeFromTail: false),
+                SummarizePeakValues(peak.PeakPositions, takeFromTail: true),
+                SummarizePeakValues(peak.PeakDbs, takeFromTail: false),
+                SummarizePeakValues(peak.PeakDbs, takeFromTail: true)
+            );
+
+            if (productLen <= 0)
+            {
+                Log.Warning(
+                    "FLA scan produced non-positive delta: zeroLength={ZeroLength} selectedPos={SelectedPos} delta={Delta}",
+                    zeroLength_m,
+                    selectedPos,
+                    productLen
+                );
+            }
+
             return (productLen, productDb);
         }
 
@@ -243,10 +299,36 @@ namespace OFDRCentralControlServer.Devices
 
             if (FrameParser.TryParseFrame(lines, out var autoPeak))
             {
+                Log.Debug(
+                    "FLA peak frame parsed: positionsCount={PositionsCount} dbCount={DbCount} positionsHead={PositionsHead} positionsTail={PositionsTail} dbHead={DbHead} dbTail={DbTail}",
+                    autoPeak.PeakPositions?.Count ?? 0,
+                    autoPeak.PeakDbs?.Count ?? 0,
+                    SummarizePeakValues(autoPeak.PeakPositions, takeFromTail: false),
+                    SummarizePeakValues(autoPeak.PeakPositions, takeFromTail: true),
+                    SummarizePeakValues(autoPeak.PeakDbs, takeFromTail: false),
+                    SummarizePeakValues(autoPeak.PeakDbs, takeFromTail: true)
+                );
+
                 return autoPeak;
             }
 
+            Log.Warning("FLA peak frame parse failed: frame={Frame}", lines);
+
             return default;
+        }
+
+        private static string SummarizePeakValues(IReadOnlyList<double>? values, bool takeFromTail, int sampleSize = 6)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return "[]";
+            }
+
+            IEnumerable<double> sample = takeFromTail
+                ? values.Skip(Math.Max(0, values.Count - sampleSize))
+                : values.Take(sampleSize);
+
+            return $"[{string.Join(", ", sample.Select(static value => value.ToString("F3")))}]";
         }
 
         public async Task SetResolutionAsync(string srMode, CancellationToken ct)
