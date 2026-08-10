@@ -22,18 +22,38 @@ namespace OFDRCentralControlServer.Devices
 
         private readonly string _scanEnd;
 
+        private readonly string _zeroPeakSelectionStrategy;
+
+        private readonly int _zeroPeakSelectionOrdinal;
+
+        private readonly string _scanPeakSelectionStrategy;
+
+        private readonly int _scanPeakSelectionOrdinal;
+
         private TcpClient? _client;
 
         private NetworkStream? _stream;
 
         private readonly ILogger Log = Serilog.Log.ForContext<FlaInstrumentAdapter>();
 
-        public FlaInstrumentAdapter(string host, int port, double zeroEnd = 100.0, double scanEnd = 300.0)
+        public FlaInstrumentAdapter(
+            string host,
+            int port,
+            double zeroEnd = 100.0,
+            double scanEnd = 300.0,
+            string? zeroPeakSelectionStrategy = null,
+            int zeroPeakSelectionOrdinal = 3,
+            string? scanPeakSelectionStrategy = null,
+            int scanPeakSelectionOrdinal = 1)
         {
             _host = host;
             _port = port;
             _zeroEnd = zeroEnd.ToString("F1");
             _scanEnd = scanEnd.ToString("F1");
+            _zeroPeakSelectionStrategy = NormalizePeakSelectionStrategy(zeroPeakSelectionStrategy, fallback: "last-peak");
+            _zeroPeakSelectionOrdinal = Math.Max(1, zeroPeakSelectionOrdinal);
+            _scanPeakSelectionStrategy = NormalizePeakSelectionStrategy(scanPeakSelectionStrategy, fallback: "last-peak");
+            _scanPeakSelectionOrdinal = Math.Max(1, scanPeakSelectionOrdinal);
         }
 
         public async Task<bool> ConnectAsync(CancellationToken ct)
@@ -95,13 +115,18 @@ namespace OFDRCentralControlServer.Devices
             if (peaks != null && peaks.PeakPositions != null && peaks.PeakPositions.Count != 0
                 && peaks.PeakDbs != null && peaks.PeakDbs.Count != 0)
             {
-                var selectedIndex = peaks.PeakPositions.Count - 1;
+                var selectedIndex = SelectPeakIndex(
+                    peaks.PeakPositions,
+                    peaks.PeakDbs,
+                    _zeroPeakSelectionStrategy,
+                    _zeroPeakSelectionOrdinal,
+                    context: "zero");
                 var selectedPos = peaks.PeakPositions[selectedIndex];
-                var selectedDb = peaks.PeakDbs.Last();
+                var selectedDb = peaks.PeakDbs[Math.Min(selectedIndex, peaks.PeakDbs.Count - 1)];
 
                 Log.Information(
                     "FLA zero peak selection: strategy={Strategy} selectedIndex={SelectedIndex} selectedPos={SelectedPos} selectedDb={SelectedDb} positionsCount={PositionsCount} dbCount={DbCount}",
-                    "last-peak",
+                    _zeroPeakSelectionStrategy,
                     selectedIndex,
                     selectedPos,
                     selectedDb,
@@ -159,14 +184,19 @@ namespace OFDRCentralControlServer.Devices
             }
 
             // 代表产品端点的峰：采用距离最大（如需按 dB 选择，可改成幅值最大）
-            var selectedIndex = peak.PeakPositions.Count - 1;
+            var selectedIndex = SelectPeakIndex(
+                peak.PeakPositions,
+                peak.PeakDbs,
+                _scanPeakSelectionStrategy,
+                _scanPeakSelectionOrdinal,
+                context: "scan");
             var selectedPos = peak.PeakPositions[selectedIndex];
             var productLen = selectedPos - zeroLength_m;
-            var productDb = peak.PeakDbs!.Last();
+            var productDb = peak.PeakDbs[selectedIndex];
 
             Log.Information(
                 "FLA scan peak selection: strategy={Strategy} zeroLength={ZeroLength} selectedIndex={SelectedIndex} selectedPos={SelectedPos} selectedDb={SelectedDb} delta={Delta} positionsCount={PositionsCount} dbCount={DbCount}",
-                "last-peak",
+                _scanPeakSelectionStrategy,
                 zeroLength_m,
                 selectedIndex,
                 selectedPos,
@@ -329,6 +359,77 @@ namespace OFDRCentralControlServer.Devices
                 : values.Take(sampleSize);
 
             return $"[{string.Join(", ", sample.Select(static value => value.ToString("F3")))}]";
+        }
+
+        private int SelectPeakIndex(
+            IReadOnlyList<double> positions,
+            IReadOnlyList<double> dbs,
+            string strategy,
+            int ordinal,
+            string context)
+        {
+            var pairCount = Math.Min(positions.Count, dbs.Count);
+            if (pairCount <= 0)
+            {
+                throw new InvalidOperationException($"No peak pairs available for {context} peak selection.");
+            }
+
+            if (positions.Count != dbs.Count)
+            {
+                Log.Warning(
+                    "FLA {Context} peak count mismatch: positionsCount={PositionsCount} dbCount={DbCount}. Selection will use pairCount={PairCount}",
+                    context,
+                    positions.Count,
+                    dbs.Count,
+                    pairCount
+                );
+            }
+
+            return strategy switch
+            {
+                "first-peak" => 0,
+                "nth-peak" => Math.Min(pairCount - 1, Math.Max(0, ordinal - 1)),
+                "strongest-db" => SelectStrongestDbIndex(dbs, pairCount),
+                _ => pairCount - 1,
+            };
+        }
+
+        private static int SelectStrongestDbIndex(IReadOnlyList<double> dbs, int pairCount)
+        {
+            var bestIndex = 0;
+            var bestDb = dbs[0];
+
+            for (var index = 1; index < pairCount; index++)
+            {
+                if (dbs[index] > bestDb)
+                {
+                    bestDb = dbs[index];
+                    bestIndex = index;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static string NormalizePeakSelectionStrategy(string? strategy, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(strategy))
+            {
+                return fallback;
+            }
+
+            return strategy.Trim().ToLowerInvariant() switch
+            {
+                "first" => "first-peak",
+                "first-peak" => "first-peak",
+                "last" => "last-peak",
+                "last-peak" => "last-peak",
+                "nth" => "nth-peak",
+                "nth-peak" => "nth-peak",
+                "strongest" => "strongest-db",
+                "strongest-db" => "strongest-db",
+                _ => fallback,
+            };
         }
 
         public async Task SetResolutionAsync(string srMode, CancellationToken ct)

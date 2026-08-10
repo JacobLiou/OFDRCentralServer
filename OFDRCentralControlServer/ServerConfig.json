@@ -12,5 +12,11 @@
   "SwitchInput": 1,
 
   "ZeroEnd": 100.0,
-  "ScanEnd": 300.0
+  "ScanEnd": 300.0,
+
+  "ZeroPeakSelectionStrategy": "last-peak",
+  "ZeroPeakSelectionOrdinal": 3,
+
+  "ScanPeakSelectionStrategy": "last-peak",
+  "ScanPeakSelectionOrdinal": 1
 }

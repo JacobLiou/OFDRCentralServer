@@ -67,7 +67,16 @@ try
     else
     {
         Log.Information("Started in REAL mode");
-        var adapter = new FlaInstrumentAdapter(cfg.FlaHost, cfg.FlaPort, cfg.ZeroEnd, cfg.ScanEnd);
+        var adapter = new FlaInstrumentAdapter(
+            cfg.FlaHost,
+            cfg.FlaPort,
+            cfg.ZeroEnd,
+            cfg.ScanEnd,
+            cfg.ZeroPeakSelectionStrategy,
+            cfg.ZeroPeakSelectionOrdinal,
+            cfg.ScanPeakSelectionStrategy,
+            cfg.ScanPeakSelectionOrdinal
+        );
         var sw = new OpticalSwitchController(cfg.SwitchCom, cfg.SwitchBaud, cfg.SwitchIndex, cfg.SwitchInput);
 
         //针对两个设备建立连接做一次诊断 如果没有连接 则报错退出

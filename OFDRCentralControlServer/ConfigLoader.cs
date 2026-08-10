@@ -30,6 +30,26 @@ namespace OFDRCentralControlServer
         /// 测长扫描最大长度（米），默认 300m
         /// </summary>
         public double ScanEnd { get; set; } = 300.0;
+
+        /// <summary>
+        /// 归零选峰策略：last-peak | first-peak | nth-peak | strongest-db
+        /// </summary>
+        public string ZeroPeakSelectionStrategy { get; set; } = "last-peak";
+
+        /// <summary>
+        /// 归零在 nth-peak 策略下使用的峰序（1-based）
+        /// </summary>
+        public int ZeroPeakSelectionOrdinal { get; set; } = 3;
+
+        /// <summary>
+        /// 扫描选峰策略：last-peak | first-peak | nth-peak | strongest-db
+        /// </summary>
+        public string ScanPeakSelectionStrategy { get; set; } = "last-peak";
+
+        /// <summary>
+        /// 扫描在 nth-peak 策略下使用的峰序（1-based）
+        /// </summary>
+        public int ScanPeakSelectionOrdinal { get; set; } = 1;
     }
 
     public static class ConfigLoader
