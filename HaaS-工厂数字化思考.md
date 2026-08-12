@@ -2,7 +2,7 @@
 
 > 基于当前 `OFDRCentralControlServer` 设备共享实践的延伸思考  
 > 文档性质：战略/架构调研备忘，非实施规格  
-> 更新日期：2026-08-12
+> 更新日期：2026-08-12（补充：国内案例、落地路径、开源项目对照）
 
 ---
 
@@ -77,29 +77,44 @@
 
 ## 4. 市场典型案例调研
 
-### 4.1 按产出付费的机床/激光：TRUMPF Pay-per-Part
+### 4.0 怎么读案例（四问法）
 
-- **模式**：客户不买断机床，按加工零件数付费；OEM 保留所有权并保障可用。
-- **使能技术**：传感器、远程监控、预测分析（工业 4.0）。
-- **启示**：HaaS 的商业闭环依赖 **可计量的产出事件**（本项目对应「一次成功测量」），以及 **可用率承诺**。
-- **参考**：[California Management Review — EaaS in Machine Tool Manufacturing (2025)](https://cmr.berkeley.edu/2025/11/equipment-as-a-service-in-machine-tool-manufacturing-unlocking-greater-value-for-all/)
+每个案例只抓四件事，避免淹没在宣传稿里：
+
+1. **卖的是什么服务？**（按件 / 按小时 / 按可用率 / 按共享机时）
+2. **稀缺资源是什么？**（机床、机器人、检测仪、产线产能）
+3. **谁决定排队/调度规则？**（OEM 远程中心、测试中心、MOM、产线计划员）
+4. **钱和责任怎么分？**（坏了谁修、失败谁买单、数据归谁）
+
+对照本项目：稀缺资源 = FLA + 光开关；服务 = `scan` / `zero` / `auto_peak`；责任 = 中控串行执行。案例多出来的部分，就是下一阶段要补的（计量、优先级、多设备、质量闭环）。
+
+---
+
+### 4.1 按产出付费的机床/激光：TRUMPF Pay-per-Part（强烈推荐精读）
+
+- **模式**：EaaS 合同提供 TruLaser Center + 料库；客户**只为实际加工出的零件付费**；TRUMPF 在 Neukirch 远程控制中心排程、编程、运维。
+- **业务动机**：解决「订单满 + 缺熟练工」；试点客户宣称生产率可提升约 50%。
+- **使能条件**：机台摄像头/传感器/远程控制；产出事件可计量；故障由服务方主动感知（利益一致）。
+- **对本项目启示**：HaaS 闭环 = **可计量产出事件**（成功测量）+ **可用率承诺**；远程中心 ≈ 你们未来的「设备能力调度台」。
+- **参考**：[CMR EaaS 文章 (2025)](https://cmr.berkeley.edu/2025/11/equipment-as-a-service-in-machine-tool-manufacturing-unlocking-greater-value-for-all/) · [TRUMPF Pay-per-Part 新闻](https://www.trumpf.com/en_INT/newsroom/global-press-releases/press-release-detail-page/release/pay-per-part-trumpf-offers-new-business-model-to-utilize-spare-machine-capacity/)
 
 ### 4.2 按飞行小时：Rolls-Royce Power-by-the-Hour
 
 - **模式**：发动机可用小时计费，维护责任在服务方。
-- **启示**：Outcome / Uptime 合同要求远程遥测与预测维护；工厂版对应 **设备健康度 + SLA 计费**。
+- **启示**：Outcome / Uptime 合同要求远程遥测与预测维护；工厂版对应 **设备健康度 + SLA 计费**（测长仪「可测小时」或「可用班次」）。
 
-### 4.3 机器人即服务：Formic RaaS
+### 4.3 机器人即服务：Formic RaaS（含 ICON 注塑厂客户故事）
 
-- **模式**：无大额 CapEx，按系统可用小时收费；涵盖选型、部署、备件、24/7 运维。
-- **技术栈亮点**：设备无关 OS（Core）、机队智能（Cortex）、OTA、OEE 看板。
-- **启示**：真正可规模化的 RaaS/HaaS 往往是 **「硬件无关的控制与运维层」**，而不是绑定单一 OEM。
-- **参考**：[Formic Full Service Automation](https://formic.co/full-service-automation)
+- **模式**：无大额 CapEx；按系统**运行小时**收费（公开叙述约 $10/小时量级）；厂商包选型、部署、备件、编程、24/7。
+- **客户侧结果（ICON）**：产能约 +20%、运营费用约 −40%、节拍效率约 +30%（厂商/媒体披露，作量级参考）。
+- **技术栈亮点**：设备无关 OS（Core）、机队智能（Cortex）、OTA、OEE。
+- **启示**：可规模化的 RaaS 是 **硬件无关的控制与运维层**；中小厂用 OpEx 换自动化，与「少买 FLA、共享测长」同构。
+- **参考**：[Formic](https://formic.co/full-service-automation) · [ICON × Formic 报道](https://www.machinedesign.com/automation-iiot/article/21273986/an-injection-molder-embraces-emergent-technology-with-robotics-as-a-service)
 
 ### 4.4 工业物联网平台：Siemens MindSphere（河钢案例）
 
 - **做法**：MindConnect 采集电机/PLC/仪表/MES；云端 APP 做辊温、质量偏差、轧辊档案、乳化液分析。
-- **启示**：价值从「连上设备」快速转向 **场景 APP**；连接本身不够，要有领域模型。
+- **启示**：价值从「连上设备」快速转向 **场景 APP**；连接本身不够，要有领域模型（对本项目 = 光纤测量领域能力，而非通用 IoT）。
 - **参考**：西门子河钢数字化案例
 
 ### 4.5 IIoT + MES-lite：PTC ThingWorx / Kepware（NEI 轴承）
@@ -114,18 +129,57 @@
 - **启示**：智能调度不是「排产算法炫技」，而是 **多资源协同状态机**（机台、物流、检验、仓储同一套指令语义）。
 - **参考**：佰思杰 MOM / 东方汽轮机案例
 
-### 4.7 国内产线改造常见模式：边缘无线 + 多品牌 PLC → MES
+### 4.7 国内智能排产：华为南方工厂 / 长安渝北新工厂
+
+| 案例 | 做法摘要 | 可学点 |
+|------|----------|--------|
+| **华为南方工厂**（《工业数字化2030》） | 排产模型细到线体/设备/夹具/人员/场地；宣称排产人员 −50%、产出 +20% | 多资源约束下的计划；调度粒度比「单机 FIFO」高一层 |
+| **长安渝北工厂 × 华为** | 1.2 万+ 设备入数字底座；月→周→日→顺序计划；AI 辅助排产与全息质量 | **计划分层**；IT/OT 数据同源后再谈智能应用 |
+| **某电气 APS 叙述** | 规则 + 有限产能 + 优先级 | 第一版智能调度 = 规则引擎，不是深度学习 |
+
+- **参考**：华为《工业数字化2030》PDF · [长安渝北案例](https://e.huawei.com/cn/case-studies/industries/manufacturing/202412-changan-yubei-new-factory)
+
+### 4.8 国内资源共享 / 「产能银行」：海尔卡奥斯、产业集群检测共享
+
+| 案例 | 做法摘要 | 可学点 |
+|------|----------|--------|
+| **海尔上海洗衣机互联工厂 + COSMOPlat** | 数字孪生仿真排产；一物一码全周期追溯；虚拟验证后再实产 | 排产先仿真；追溯与服务化绑定 |
+| **卡奥斯「产能银行」叙事** | 闲置设备/产能跨企业调剂 | 把产能当可交易资源；厂内可先做「虚拟计费」简化版 |
+| **珠三角等检测设备共享叙述** | 多家企业共享精密检测仪，利用率拉高 | 与「一台 FLA 服务多工位」**同一逻辑**，组织边界更大 |
+
+- **注意**：跨企业共享涉及信任、计量纠纷、数据权属，**远难于厂内共享**；建议厂内 HaaS 跑通后再外扩。
+- **参考**：[海尔松江洗衣机工厂报道](https://www.haier.com/press-events/news/20230728_212611.shtml)
+
+### 4.9 国内产线改造常见模式：边缘无线 + 多品牌 PLC → MES
 
 - **做法**：新旧产线混杂、西门子/三菱/汇川并存，用工业无线网桥透明传输，数据进 MES，做 OEE 与调度。
 - **启示**：工厂现实是 **棕地**；方案必须兼容私有串口、TCP 文本帧（如本项目 FLA）、Modbus、OPC 等，而不能假设全厂 OPC UA。
 
-### 4.8 3D 打印 / 医疗影像等「设备订阅」
+### 4.10 3D 打印 / 医疗影像等「设备订阅」
 
 - Stratasys 等常走「卖机 + 材料/服务订阅」混合模型。
 - 医疗影像 MRI/CT 的设备订阅（PwC/SAP 讨论较多）：高 CapEx 资产 OpEx 化。
 - **启示**：光纤测试仪、光谱仪等高单价仪器与 MRI 同构——**共享 + 订阅** 比「每工位买一台」更合理。
 
-### 4.9 市场体量（量级参考，口径不一）
+### 4.11 灯塔级（开阔眼界，不宜第一年对标）
+
+| 案例 | 一句话 | 为何暂不照抄 |
+|------|--------|--------------|
+| 富士康 × NVIDIA Omniverse 数字孪生 | 产线虚拟组装、跨厂复制、视频 AI Agent | 需庞大标准化资产库与 IT 团队 |
+| 完整「黑灯工厂」宣传案例 | 全无人产线 | 前置条件是工艺/物流/质量全部数字化闭环 |
+
+### 4.12 案例对照本项目（一张表）
+
+| 你要补的能力 | 优先对标案例 | 开源可动手处（见 §6） |
+|--------------|--------------|----------------------|
+| 按次/按产出计量 | TRUMPF、Formic | 自研计量事件 + 时序库 |
+| 异构设备接入 | NEI/Kepware、河钢 | ThingsGateway / Neuron / UMH |
+| 厂级数据总线 UNS | 长安数字底座、UMH 用户故事 | UMH、EMQX、UNS Framework |
+| 多资源调度 | 东方汽轮机 MOM、华为南方工厂 | Timefold（排程引擎） |
+| 看板 / OEE | NEI、海尔孪生大屏 | FUXA、Grafana |
+| 检测资源共享 | 产业集群检测共享、本项目 | **就是 OFDR 中控本身** |
+
+### 4.13 市场体量（量级参考，口径不一）
 
 | 来源口径 | 信号 |
 |----------|------|
@@ -137,9 +191,130 @@
 
 ---
 
-## 5. 工厂数字化要集成「所有设备」——目标架构
+## 5. 落地路径：没做过这类项目怎么起步
 
-### 5.1 分层参考（ISA-95 + 现代 UNS）
+> 原则：**选痛点，不选平台；先服务目录与规则，再智能算法；先厂内虚拟计费，再对外 HaaS。**
+
+### 5.1 六步法（业务为主）
+
+| 步骤 | 做什么 | 完成标志 |
+|------|--------|----------|
+| 1. 选场景 | 设备贵、闲着多、多人抢、协议怪 | 写下 ROI：少买几台 / 等待降多少 |
+| 2. 服务目录 | 列出可调用能力（如归零/测长/复测）、SLA、失败策略 | 一页「产品说明书」 |
+| 3. 人工规则调度 | FIFO + 急单插队 + 维护禁入 + 防饥饿 | 两周无无「影子插队」 |
+| 4. 内部虚拟计费 | 按成功次数记到工位/部门 | 利用率报表能拿出来开会 |
+| 5. 能力 Owner | 明确谁修设备、谁定规则、谁认质量结果 | RACI 表 |
+| 6. 横向复制 | 第二台高价值仪器套同一套「提交—排队—结果—计量」 | 才叫平台雏形 |
+
+### 5.2 和本仓库的映射
+
+```
+今天：工位 → submit → FIFO → 回 result     （服务化 MVP）
+↓ §5.1 步骤 3–4
+近场：+ priority/deadline + 计量日志 + 结果落库
+↓ 第二类设备
+中场：多 Agent + MQTT 事件给 MES/看板
+↓ 多产线
+远场：UNS + 独立 Scheduler + 可选按次对外收费
+```
+
+---
+
+## 6. 开源项目参考（可学、可 fork、可对照架构）
+
+> **定位**：商业案例告诉你「为什么」与「做成什么样」；开源项目告诉你「第一块砖怎么砌」。  
+> **原则**：边侧确定性控制（光开关时序、FLA 私有帧）**继续自研**；开源优先用于 **采集网关、消息总线、看板、排程引擎、UNS 参考实现**。  
+> 下列项目生态变化快，采用前请核对当前 License 与社区活跃度。
+
+### 6.1 按架构层次对照
+
+```
+工位 / MES / 看板 / 排程
+        │
+        ▼
+┌─────────────────── 开源可借鉴层 ───────────────────┐
+│  UNS / 消息：UMH · EMQX · Mosquitto · Sparkplug   │
+│  看板/HMI：FUXA · Grafana                         │
+│  排程优化：Timefold Solver                        │
+│  采集网关：ThingsGateway · Neuron · IoTGateway    │
+│  OPC UA：Eclipse Milo · automation-gateway       │
+└───────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────── 建议继续自研 ───────────────────┐
+│  OFDRCentralControlServer（任务队列、设备锁、     │
+│  FLA/光开关 Adapter、测量领域逻辑、工位 TCP 协议） │
+└───────────────────────────────────────────────────┘
+```
+
+### 6.2 统一命名空间 / 工厂数据底座
+
+| 项目 | 地址 | 学什么 | 与 OFDR 关系 |
+|------|------|--------|--------------|
+| **United Manufacturing Hub (UMH)** | [github.com/united-manufacturing-hub/united-manufacturing-hub](https://github.com/united-manufacturing-hub/united-manufacturing-hub) · [umh.app](https://www.umh.app/) | 开源 UNS 全栈思路：边缘采集 → 标准化 → 存储/交换 → 可视化；UMH Core 单容器边缘网关 | 阶段 B/E：中控把 `task.*` 事件打进 UNS，而不是点对点改 MES |
+| **UNS Framework** | [unsframework.com](https://unsframework.com/) | ISA-95 主题树 YAML 约定、payload 规范、参考 serverless 实现 | 设计 MQTT 主题时直接抄层级：`Enterprise/Site/Area/Line/Device` |
+| **EMQX**（社区版） | [github.com/emqx/emqx](https://github.com/emqx/emqx) | 高并发 MQTT Broker；工业 UNS 常用底座之一 | 旁路发布测量事件；文档区有大量 UNS/OPC-MQTT 文章 |
+| **Eclipse Tahu / Sparkplug** | Eclipse Tahu 等 | 工业 MQTT 载荷与 birth/death 会话语义 | 若要对齐生态，任务状态可用 Sparkplug 风格规范化 |
+| **idp-os** | [github.com/cftservices/idp-os](https://github.com/cftservices/idp-os) | 「Connect→Condition→Model→Store→Orchestrate」参考流水线（NiFi/RabbitMQ/Neo4j 等） | 学分层，不必整包搬进工厂 |
+
+### 6.3 工业采集网关 / 协议归一（棕地刚需）
+
+| 项目 | 地址 | 学什么 | 与 OFDR 关系 |
+|------|------|--------|--------------|
+| **ThingsGateway** | [github.com/ThingsGateway/ThingsGateway](https://github.com/ThingsGateway/ThingsGateway)（亦有 Gitee） | **.NET 8** 工业网关：多 PLC 协议、MQTT/Kafka/OPC UA 转发、插件化——与本仓库技术栈同族 | 第二类「标准协议设备」可走网关；FLA 私有帧仍用自研 Adapter |
+| **Neuron / NeuronEX**（EMQ） | [github.com/emqx/neuron](https://github.com/emqx/neuron) | 轻量工业协议采集，南向 Modbus/OPC/S7 等，北向 MQTT | 边缘「协议翻译官」参考 |
+| **IoTGateway** | [github.com/iioter/iotgateway](https://github.com/iioter/iotgateway) | .NET B/S 网关、可视化配置、多驱动 | 快速搭采集 POC |
+| **EdgeX（anviod/edgex 等工业边缘实现）** | GitHub 检索 industrial edge gateway | 南向多协议 + 北向 MQTT/Sparkplug + 边缘规则 | 学「影子真源 + 北向解耦」 |
+| **Apache PLC4X** | [plc4x.apache.org](https://plc4x.apache.org/) | 统一 API 读多种 PLC | Java/多语言生态；作协议知识库 |
+| **automation-gateway** | [github.com/vogler75/automation-gateway](https://github.com/vogler75/automation-gateway) | OPC UA ↔ MQTT/GraphQL，可写时序库 | 当需要「OPC 门面」给 MES 时参考 |
+| **Eclipse Milo** | [github.com/eclipse-milo/milo](https://github.com/eclipse-milo/milo) | Java OPC UA 协议栈 | 自建 OPC UA Server/Client 时的标准库 |
+| **ThingsBoard + Gateway** | [thingsboard.io](https://thingsboard.io/) · [thingsboard-gateway](https://github.com/thingsboard/thingsboard-gateway) | 设备管理、规则链、仪表盘；网关接 Modbus/OPC UA | 快速做「设备台账 + 遥测看板」MVP |
+
+### 6.4 看板 / 轻量 SCADA / HMI
+
+| 项目 | 地址 | 学什么 | 与 OFDR 关系 |
+|------|------|--------|--------------|
+| **FUXA** | [github.com/frangoteam/FUXA](https://github.com/frangoteam/FUXA) | Web SCADA/HMI：Modbus/OPC UA/MQTT/S7，拖拽画面 | 订阅中控 MQTT 事件，做通道忙闲/队列长度大屏 |
+| **Grafana** + 时序库 | grafana.com | OEE、等待时长、成功率仪表盘 | 计量与 KPI 可视化（§11） |
+
+### 6.5 智能排程 / 约束优化（调度从规则到求解器）
+
+| 项目 | 地址 | 学什么 | 与 OFDR 关系 |
+|------|------|--------|--------------|
+| **Timefold Solver**（OptaPlanner 继任社区版） | [github.com/TimefoldAI/timefold-solver](https://github.com/TimefoldAI/timefold-solver) | Job Shop、任务分配、维护窗口等约束求解（Apache-2.0） | 阶段 C/D：多仪器 + 截止时间 + 换型成本时再引入；**日常 FIFO/优先级不必上求解器** |
+| **Google OR-Tools** | [developers.google.com/optimization](https://developers.google.com/optimization) | CP-SAT/车辆路径等经典运筹库 | 离线仿真排程、产能 What-if |
+
+### 6.6 工作流 / 编排（多步测量配方）
+
+| 项目 | 地址 | 学什么 | 与 OFDR 关系 |
+|------|------|--------|--------------|
+| **Temporal** / **Cadence** | temporal.io 等 | 长事务工作流、重试、补偿 | `切通道→zero→scan→写QMS` 可建模为 Workflow |
+| **Node-RED** | nodered.org | 低代码连设备与 HTTP/MQTT | 实验室/试点连线；生产关键路径仍建议代码化 |
+| **n8n** | n8n.io | 自动化编排（idp-os 等方案里常见） | 告警、工单、钉钉/邮件通知 |
+
+### 6.7 建议的「开源学习顺序」（贴合本仓库）
+
+| 顺序 | 动作 | 对应演进阶段 |
+|------|------|--------------|
+| ① | 读 UMH / UNS Framework 文档，画一张本厂主题树草图 | 概念对齐 §7 |
+| ② | 本机起 EMQX，中控旁路发布 `task.queued/running/done` | 阶段 B |
+| ③ | FUXA 或 Grafana 订阅读队列深度、通道占用 | 可观测 |
+| ④ | 用 ThingsGateway 接一台标准协议设备（如 Modbus 仪表） | 验证「网关 + 自研 Agent」双轨 |
+| ⑤ | 需要多约束排程时，用 Timefold 做**离线**仿真，不要先替换在线 FIFO | 阶段 C+ |
+| ⑥ | 始终保留 OFDR 中控本地锁与队列，作为调度器故障时的降级路径 | 反模式 §10 |
+
+### 6.8 开源选型注意
+
+1. **License**：Apache-2.0 / MIT 利于商用闭源集成；AGPL/部分 SSPL 需法务评估。  
+2. **OT 安全**：开源组件默认配置常过宽，上线前强制 TLS、ACL、只读账号。  
+3. **不要用开源 MES「替换」测长中控**：领域协议与互斥语义仍在边侧；开源吃「数据与调度」，自研吃「设备真相」。  
+4. **中文社区友好**：ThingsGateway、IoTGateway、EMQX/Neuron 文档与 Issue 对国内产线更友好。
+
+---
+
+## 7. 工厂数字化要集成「所有设备」——目标架构
+
+### 7.1 分层参考（ISA-95 + 现代 UNS）
 
 ```
 L4 ERP / 财务结算 / 多工厂 KPI
@@ -164,7 +339,7 @@ L1/L0 现场：PLC、仪表、光开关、FLA、机器人、AGV
 
 参考方向：HiveMQ / EMQX + Sparkplug、OPC UA Companion Spec、Digital Twin ↔ MES 事件同步。
 
-### 5.2 设备能力模型（建议的核心抽象）
+### 7.2 设备能力模型（建议的核心抽象）
 
 每个物理设备注册为 **Capability**：
 
@@ -193,7 +368,7 @@ OFDR 现状可直接映射：
 - `exclusive: true` ↔ `_deviceLock`
 - 计量单位 ↔ 成功 `result`
 
-### 5.3 智能调度（从 FIFO 到可生产级）
+### 7.3 智能调度（从 FIFO 到可生产级）
 
 调度问题本质是 **带约束的资源分配**：
 
@@ -215,24 +390,24 @@ OFDR 现状可直接映射：
 
 需要：事务性资源租约（lease）、超时回收、失败补偿（重试/换备用通道）。
 
-### 5.4 推荐技术栈（务实、可演进）
+### 7.4 推荐技术栈（务实、可演进）
 
 | 层次 | 建议 | 说明 |
 |------|------|------|
-| 现场适配 | 保留 .NET 边侧中控（本项目） | 串口/私有帧最稳；每类设备一个 Adapter |
-| 边侧总线 | MQTT（EMQX）+ 可选 Sparkplug B | 解耦 MES/看板/调度 |
-| 语义 | 内部 Capability Schema + 对外 OPC UA 门面 | 棕地协议先进 Adapter，再归一 |
+| 现场适配 | 保留 .NET 边侧中控（本项目）；标准协议可旁路 ThingsGateway（§6.3） | 串口/私有帧最稳；每类设备一个 Adapter |
+| 边侧总线 | MQTT（EMQX 开源）+ 可选 Sparkplug B；参考 UMH / UNS Framework（§6） | 解耦 MES/看板/调度 |
+| 语义 | 内部 Capability Schema + 对外 OPC UA 门面（Milo / automation-gateway） | 棕地协议先进 Adapter，再归一 |
 | 任务编排 | 持久化队列（Redis Streams / NATS / Kafka） | 替代进程内 Channel，支持重启恢复 |
-| 调度服务 | 独立 Scheduler（可先规则引擎） | 与 Worker 分离 |
+| 调度服务 | 先规则引擎；多约束时参考 Timefold 离线求解（§6.5） | 与 Worker 分离 |
 | 状态与结果 | PostgreSQL + 时序库（可选） | 替代 MemoryCache；支撑计费与追溯 |
 | API | gRPC / HTTP JSON（对内）+ TCP JSON-Lines（工位兼容） | 渐进迁移，不打断现有客户端 |
-| 可观测 | OpenTelemetry + 现有 Serilog | TaskId 贯穿 |
+| 可观测 | OpenTelemetry + Serilog；看板可用 FUXA / Grafana（§6.4） | TaskId 贯穿 |
 | 安全 | mTLS / Token、设备证书、主题 ACL | 规模化前置条件 |
 | AI | 先做预测维护与排队 ETA，再谈「自主排产 Agent」 | 数据质量不够时 Agent 无意义 |
 
 **不建议一上来**：全厂上巨型商业 IIoT 套件替代边侧中控；边侧确定性控制必须留在本地。
 
-### 5.5 与现有 OFDR 服务的演进关系
+### 7.5 与现有 OFDR 服务的演进关系
 
 ```
 阶段 A（已完成）
@@ -266,7 +441,7 @@ OFDR 现状可直接映射：
 
 ---
 
-## 6. 「集成所有设备」的现实策略
+## 8. 「集成所有设备」的现实策略
 
 「所有设备」在工程上应拆成三类，分类施策：
 
@@ -288,7 +463,7 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 
 ---
 
-## 7. 商业与组织层面（常被技术忽略）
+## 9. 商业与组织层面（常被技术忽略）
 
 | 议题 | 问题 | 建议 |
 |------|------|------|
@@ -300,7 +475,7 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 
 ---
 
-## 8. 风险与反模式
+## 10. 风险与反模式
 
 1. **先买平台再找场景**：应对齐「共享测长」这类可算 ROI 的场景横向复制。  
 2. **用云取代边侧实时控制**：光开关/测量时序必须本地确定性。  
@@ -311,7 +486,7 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 
 ---
 
-## 9. 可量化的成功标准（建议）
+## 11. 可量化的成功标准（建议）
 
 | KPI | 当前可测（OFDR） | 平台期目标 |
 |-----|------------------|------------|
@@ -324,22 +499,22 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 
 ---
 
-## 10. 对「下一步」的具体建议（贴合本仓库）
+## 12. 对「下一步」的具体建议（贴合本仓库）
 
-不必立刻重写。建议用「垫脚石」演进：
+不必立刻重写。建议用「垫脚石」演进（与 §5、§6.7 一致）：
 
 1. **抽象 DeviceAgent 接口**：把 FLA+Switch 收成一个 `IDeviceAgent`，为第二台仪器留位。  
 2. **任务持久化**：队列与结果落库，进程重启不丢单。  
 3. **优先级字段**：协议增加 `priority` / `deadline`，调度仍可单进程。  
-4. **MQTT 旁路发布**：`task.queued|running|done` 事件给看板/MES，客户端 TCP 协议可保留。  
+4. **MQTT 旁路发布**：`task.queued|running|done` 事件给看板/MES（EMQX + FUXA/Grafana），客户端 TCP 协议可保留。  
 5. **计量日志**：每次成功测量写计量事件（未来账单的原材料）。  
-6. **第二类设备试点**：选一台同产线高价值仪器，复制「中控共享」模式，验证平台抽象。  
+6. **第二类设备试点**：标准协议走 ThingsGateway；私有协议复制「中控共享」模式，验证双轨抽象。  
 
-当出现 **≥3 类设备、≥2 条产线共享同一调度语义** 时，再拆独立 Scheduler 与 UNS，性价比最高。
+当出现 **≥3 类设备、≥2 条产线共享同一调度语义** 时，再拆独立 Scheduler 与 UNS（UMH / 自建主题树），性价比最高。
 
 ---
 
-## 11. 总览图：从本服务到工厂 HaaS
+## 13. 总览图：从本服务到工厂 HaaS
 
 ```
   工位客户端 × N          其他系统(MES/QMS/看板)
@@ -362,17 +537,41 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 
 ---
 
-## 12. 参考与延伸阅读
+## 14. 参考与延伸阅读
 
-1. TRUMPF / EaaS：CMR *Equipment as a Service in Machine Tool Manufacturing* (2025)  
-2. IBM：*What is Hardware as a Service (HaaS)?*  
-3. Carlsquare：*Equipment-as-a-Service Market Report 2025*  
-4. Formic：RaaS / Full Service Automation  
+### 14.1 商业与行业案例
+
+1. TRUMPF / EaaS：CMR *Equipment as a Service in Machine Tool Manufacturing* (2025)；TRUMPF Pay-per-Part 官方新闻  
+2. Formic RaaS / ICON 注塑客户故事（Machine Design 等报道）  
+3. IBM：*What is Hardware as a Service (HaaS)?*  
+4. Carlsquare：*Equipment-as-a-Service Market Report 2025*  
 5. PTC：NEI ThingWorx + Kepware 工厂数字化案例  
 6. Siemens MindSphere：河钢集团质量与设备透明化案例  
-7. Unified Namespace + MQTT Sparkplug / OPC UA PubSub 架构综述（2026）  
-8. 东方汽轮机叶片产线 + MOM 黑灯调度案例  
-9. 本仓库：`claude.md`、`OFDRCentralControlServer/` 实现
+7. 华为《工业数字化2030》；长安渝北新工厂案例  
+8. 海尔卡奥斯 / 松江洗衣机互联工厂报道  
+9. 东方汽轮机叶片产线 + MOM 黑灯调度案例  
+10. Rolls-Royce Power-by-the-Hour（经典 outcome 合同）
+
+### 14.2 架构与 UNS
+
+11. Unified Namespace + MQTT Sparkplug / OPC UA PubSub 架构综述（HiveMQ / EMQX 博客等，2026）  
+12. UNS Framework：https://unsframework.com/  
+13. United Manufacturing Hub：https://umh.app/ · GitHub `united-manufacturing-hub`
+
+### 14.3 开源项目（详见 §6）
+
+14. ThingsGateway（.NET 工业网关）  
+15. Neuron / EMQX  
+16. FUXA（Web SCADA/HMI）  
+17. Timefold Solver（约束排程）  
+18. Eclipse Milo、Apache PLC4X、automation-gateway  
+19. ThingsBoard + IoT Gateway  
+20. Temporal / Node-RED（工作流试点）
+
+### 14.4 本仓库
+
+21. `claude.md`、`OFDRCentralControlServer/` 实现  
+22. 本文：从单仪器共享到 HaaS 能力平台的演进备忘
 
 ---
 
@@ -383,7 +582,8 @@ HaaS 的锋利点在 **类型 A**：CAPEX 高、利用率低、协议怪、天�
 | HaaS | Hardware as a Service，硬件订阅/托管 |
 | EaaS | Equipment as a Service，工业设备按使用/产出付费 |
 | RaaS | Robotics as a Service |
-| UNS | Unified Namespace，工厂统一数据命名空间 |
+| UNS | Unified Namespace，工厂统一数据命名空间；开源参考 UMH、UNS Framework（§6.2） |
+| Sparkplug B | 工业 MQTT 载荷与会话约定，常与 UNS 搭配 |
 | MOM | Manufacturing Operations Management |
 | OEE | Overall Equipment Effectiveness |
 | Capability | 设备对外暴露的可调用能力（本构想核心对象） |
