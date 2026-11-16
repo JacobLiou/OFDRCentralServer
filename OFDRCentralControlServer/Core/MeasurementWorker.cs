@@ -187,7 +187,7 @@ namespace OFDRCentralControlServer.Core
                             zeroOutcome.PeakDb,
                             zeroOutcome.Attempts,
                             zeroOutcome.Success,
-                            string.Join("; ", zeroOutcome.Measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk")));
+                            string.Join("; ", zeroOutcome.Measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk/{m.SelectedDb:F1}dB")));
                     }
                     else
                     {
@@ -381,19 +381,20 @@ namespace OFDRCentralControlServer.Core
                     Log
                 );
 
-                var measurement = new ZeroMeasurement(zero.Zero_Len, zero.Zero_Db, zero.PeakCount);
+                var measurement = new ZeroMeasurement(zero.Zero_Len, zero.Zero_Db, zero.PeakCount, zero.PeakDbCount);
                 measurements.Add(measurement);
 
                 var evaluation = ZeroConsistencyEvaluator.Evaluate(measurement, previousEvaluation, lastZeroHistory, options);
 
                 Log.Information(
-                    "Zero consistency attempt {Attempt}/{TotalAttempts}: clientId={ClientId} pos={Position} db={Db} peaks={PeakCount} suspicious={Suspicious} reason={Reason} converged={Converged} accepted={Accepted}",
+                    "Zero consistency attempt {Attempt}/{TotalAttempts}: clientId={ClientId} pos={Position} db={Db} peaks={PeakCount}/{PeakDbCount} suspicious={Suspicious} reason={Reason} converged={Converged} accepted={Accepted}",
                     attempt,
                     totalAttempts,
                     clientId,
                     measurement.SelectedPosition,
                     measurement.SelectedDb,
                     measurement.PeakCount,
+                    measurement.PeakDbCount,
                     evaluation.IsSuspicious,
                     evaluation.SuspiciousReason ?? "",
                     evaluation.IsConverged,
@@ -418,7 +419,7 @@ namespace OFDRCentralControlServer.Core
                 previousEvaluation = evaluation;
             }
 
-            var summary = string.Join("; ", measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk"));
+            var summary = string.Join("; ", measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk/{m.SelectedDb:F1}dB"));
             return new ZeroExecutionOutcome(
                 false,
                 -1d,

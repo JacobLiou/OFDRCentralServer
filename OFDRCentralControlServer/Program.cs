@@ -106,7 +106,11 @@ try
                 cfg.ZeroRetestCount,
                 cfg.ZeroConvergenceToleranceM,
                 cfg.ZeroHistoryJumpThresholdM,
-                cfg.ZeroRetestDelayMs)
+                cfg.ZeroRetestDelayMs,
+                DetectionThresholdDb: double.Parse(OFDRCentralControlServer.Protocol.Const.DEFAULT_THRESHOLD, System.Globalization.CultureInfo.InvariantCulture),
+                ThresholdMarginDb: cfg.ZeroThresholdMarginDb,
+                DbConvergenceToleranceDb: cfg.ZeroDbConvergenceToleranceDb,
+                WindowEndM: cfg.ZeroEnd)
         );
         serverTask = server.StartAsync(cts.Token);
         workerTask = worker.StartAsync(cts.Token);

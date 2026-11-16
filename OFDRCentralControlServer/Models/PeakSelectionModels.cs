@@ -22,5 +22,6 @@ namespace OFDRCentralControlServer.Models
     public record ZeroMeasurement(
         double SelectedPosition,
         double SelectedDb,
-        int PeakCount);
+        int PeakCount,
+        int PeakDbCount);
 }

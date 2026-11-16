@@ -95,6 +95,17 @@ namespace OFDRCentralControlServer
         /// 归零补测之间的间隔（毫秒），给设备恢复/稳定的时间。
         /// </summary>
         public int ZeroRetestDelayMs { get; set; } = 500;
+
+        /// <summary>
+        /// 归零门限裕度（dB）：选中峰强度必须高于检测门限（默认 -80dB）该值以上，
+        /// 否则视为贴近噪声底的可疑帧，触发补测对比。
+        /// </summary>
+        public double ZeroThresholdMarginDb { get; set; } = 5.0;
+
+        /// <summary>
+        /// 归零收敛判定的强度容差（dB）：连续两次归零选中峰强度差在该值内才视为收敛。
+        /// </summary>
+        public double ZeroDbConvergenceToleranceDb { get; set; } = 3.0;
     }
 
     public static class ConfigLoader

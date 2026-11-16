@@ -29,5 +29,8 @@
   "ZeroRetestCount": 2,
   "ZeroConvergenceToleranceM": 0.1,
   "ZeroHistoryJumpThresholdM": 2.0,
-  "ZeroRetestDelayMs": 500
+  "ZeroRetestDelayMs": 500,
+
+  "ZeroThresholdMarginDb": 5.0,
+  "ZeroDbConvergenceToleranceDb": 3.0
 }
