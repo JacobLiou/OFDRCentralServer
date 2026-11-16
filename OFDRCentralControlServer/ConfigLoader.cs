@@ -70,6 +70,31 @@ namespace OFDRCentralControlServer
         /// 预测式扫描中对尾峰的附加偏好权重；保留历史 last-peak 经验，但不再写死。
         /// </summary>
         public double ScanPredictiveTailPreferenceWeight { get; set; } = 12.0;
+
+        /// <summary>
+        /// 归零最小峰数：设备回复峰数量低于该值视为可疑帧（单峰即异常），触发补测对比。
+        /// </summary>
+        public int ZeroMinPeakCount { get; set; } = 2;
+
+        /// <summary>
+        /// 归零补测次数：首次结果可疑时，最多额外补测的次数。
+        /// </summary>
+        public int ZeroRetestCount { get; set; } = 2;
+
+        /// <summary>
+        /// 归零收敛容差（米）：连续两次归零选中峰位置差在该值内视为一致，可采纳。
+        /// </summary>
+        public double ZeroConvergenceToleranceM { get; set; } = 0.1;
+
+        /// <summary>
+        /// 与该通道最近一次成功归零差超过该值时，视为可疑并触发补测（米）。
+        /// </summary>
+        public double ZeroHistoryJumpThresholdM { get; set; } = 2.0;
+
+        /// <summary>
+        /// 归零补测之间的间隔（毫秒），给设备恢复/稳定的时间。
+        /// </summary>
+        public int ZeroRetestDelayMs { get; set; } = 500;
     }
 
     public static class ConfigLoader

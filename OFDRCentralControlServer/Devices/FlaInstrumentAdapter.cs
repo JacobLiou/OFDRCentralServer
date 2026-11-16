@@ -93,9 +93,9 @@ namespace OFDRCentralControlServer.Devices
         /// 归零
         /// </summary>
         /// <param name="ct"></param>
-        /// <returns></returns>
+        /// <returns>选中峰位置/强度，以及设备回复的总峰数（用于一致性判定：单峰即可疑）</returns>
         /// <exception cref="InvalidOperationException"></exception>
-        public async Task<(double Zero_Len, double Zero_Db)> ZeroLengthAsync(CancellationToken ct)
+        public async Task<(double Zero_Len, double Zero_Db, int PeakCount)> ZeroLengthAsync(CancellationToken ct)
         {
             // 自动寻峰（多个峰）：使用默认参数（Start/End/Algo/Width/Threshold/Id/Sn）
             Log.Debug($" {nameof(AutoPeakMultiAsync)} ");
@@ -143,10 +143,10 @@ namespace OFDRCentralControlServer.Devices
                     SummarizePeakValues(peaks.PeakDbs, takeFromTail: true)
                 );
 
-                return (selectedPos, selectedDb);
+                return (selectedPos, selectedDb, peaks.PeakPositions.Count);
             }
 
-            return (-1d, 0d);
+            return (-1d, 0d, peaks?.PeakPositions?.Count ?? 0);
         }
 
         /// <summary>

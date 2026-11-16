@@ -18,4 +18,9 @@ namespace OFDRCentralControlServer.Models
         double LengthM,
         double PeakDb,
         DateTime RecordedAt);
+
+    public record ZeroMeasurement(
+        double SelectedPosition,
+        double SelectedDb,
+        int PeakCount);
 }

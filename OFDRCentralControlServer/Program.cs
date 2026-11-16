@@ -100,7 +100,13 @@ try
             cfg.ScanPredictiveRetestCount,
             cfg.ScanPredictiveHistoryJumpThresholdM,
             cfg.ScanPredictiveConvergenceToleranceM,
-            cfg.ScanPredictiveTailPreferenceWeight
+            cfg.ScanPredictiveTailPreferenceWeight,
+            new ZeroConsistencyOptions(
+                cfg.ZeroMinPeakCount,
+                cfg.ZeroRetestCount,
+                cfg.ZeroConvergenceToleranceM,
+                cfg.ZeroHistoryJumpThresholdM,
+                cfg.ZeroRetestDelayMs)
         );
         serverTask = server.StartAsync(cts.Token);
         workerTask = worker.StartAsync(cts.Token);

@@ -50,6 +50,8 @@ namespace OFDRCentralControlServer.Core
 
         private readonly double _scanPredictiveTailPreferenceWeight;
 
+        private readonly ZeroConsistencyOptions _zeroConsistency;
+
         private readonly ILogger Log = Serilog.Log.ForContext<MeasurementWorker>();
 
         public MeasurementWorker(
@@ -61,7 +63,8 @@ namespace OFDRCentralControlServer.Core
             int scanPredictiveRetestCount = 1,
             double scanPredictiveHistoryJumpThresholdM = 25.0,
             double scanPredictiveConvergenceToleranceM = 2.0,
-            double scanPredictiveTailPreferenceWeight = 12.0)
+            double scanPredictiveTailPreferenceWeight = 12.0,
+            ZeroConsistencyOptions? zeroConsistency = null)
         {
             _queue = queue;
             _server = server;
@@ -74,6 +77,7 @@ namespace OFDRCentralControlServer.Core
             _scanPredictiveHistoryJumpThresholdM = Math.Max(0.5, scanPredictiveHistoryJumpThresholdM);
             _scanPredictiveConvergenceToleranceM = Math.Max(0.1, scanPredictiveConvergenceToleranceM);
             _scanPredictiveTailPreferenceWeight = Math.Max(0, scanPredictiveTailPreferenceWeight);
+            _zeroConsistency = zeroConsistency ?? new ZeroConsistencyOptions();
         }
 
         public async Task StartAsync(CancellationToken ct)
@@ -155,38 +159,35 @@ namespace OFDRCentralControlServer.Core
                     }
                     else if (task.Mode.Equals("zero", StringComparison.OrdinalIgnoreCase))
                     {
-                        // 执行归零操作
-                        var zero = await RetryAsync(
-                            async () => await _fla.ZeroLengthAsync(ct),
-                            "zero",
-                            RETRY_MEASURE_MAX,
-                            BASE_DELAY_MEASURE,
-                            ct,
-                            Log
-                        );
+                        // 执行归零操作：结果可疑（单峰/无峰/历史跳变）时自动补测对比，连续一致才采纳
+                        var zeroOutcome = await ExecuteZeroWithVerificationAsync(task.ClientId, ct);
 
-                        if (zero.Zero_Len > 0)
+                        if (zeroOutcome.Success)
                         {
                             data = new
                             {
                                 clientId = task.ClientId,
                                 mode = task.Mode,
-                                length_m = zero.Zero_Len,
-                                peak_db = zero.Zero_Db
+                                length_m = zeroOutcome.LengthM,
+                                peak_db = zeroOutcome.PeakDb
                             };
                             result = new ResultMessage("result", task.TaskId, status: ResultStatus.success.ToString(), data: data, error: null);
+                            HourlyResultStore.Instance.RecordSuccessfulMeasurement(task.ClientId, task.Mode, zeroOutcome.LengthM, zeroOutcome.PeakDb);
                         }
                         else
                         {
-                            result = new ResultMessage("result", task.TaskId, status: ResultStatus.failed.ToString(), data: null, error: "FLA zero error reuslt < 0");
+                            result = new ResultMessage("result", task.TaskId, status: ResultStatus.failed.ToString(), data: null, error: zeroOutcome.Error ?? "FLA zero error reuslt < 0");
                         }
 
                         Log.Debug(JsonSerializer.Serialize(result));
-                        Log.Information("FLA zero done for task {TaskId}: zero_data={Zero}", task.TaskId, zero); ;
-                        if (zero.Zero_Len > 0)
-                        {
-                            HourlyResultStore.Instance.RecordSuccessfulMeasurement(task.ClientId, task.Mode, zero.Zero_Len, zero.Zero_Db);
-                        }
+                        Log.Information(
+                            "FLA zero done for task {TaskId}: zero_data=({LengthM}, {PeakDb}) attempts={Attempts} success={Success} measurements=[{Measurements}]",
+                            task.TaskId,
+                            zeroOutcome.LengthM,
+                            zeroOutcome.PeakDb,
+                            zeroOutcome.Attempts,
+                            zeroOutcome.Success,
+                            string.Join("; ", zeroOutcome.Measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk")));
                     }
                     else
                     {
@@ -350,6 +351,83 @@ namespace OFDRCentralControlServer.Core
             return new ScanExecutionOutcome(false, res.Scan_Len, res.Scan_Db, "FLA scan error reuslt < 0", 1);
         }
 
+        /// <summary>
+        /// 归零测量 + 一致性验证：
+        /// 首次测量结果可疑（峰数量不足、无峰、与该通道最近一次成功归零跳变过大）时自动补测，
+        /// 连续两次不可疑且选中峰位置差在容差内才采纳；超过补测次数仍不收敛则返回失败并附上各次测量值。
+        /// </summary>
+        private async Task<ZeroExecutionOutcome> ExecuteZeroWithVerificationAsync(int clientId, CancellationToken ct)
+        {
+            HourlyResultStore.Instance.TryGetLastZeroHistory(clientId, out var lastZeroHistory);
+            var options = _zeroConsistency;
+            var totalAttempts = 1 + Math.Max(0, options.RetestCount);
+
+            var measurements = new List<ZeroMeasurement>(totalAttempts);
+            ZeroMeasurementEvaluation? previousEvaluation = null;
+
+            for (var attempt = 1; attempt <= totalAttempts; attempt++)
+            {
+                if (attempt > 1 && options.RetestDelayMs > 0)
+                {
+                    await Task.Delay(options.RetestDelayMs, ct);
+                }
+
+                var zero = await RetryAsync(
+                    async () => await _fla.ZeroLengthAsync(ct),
+                    "zero",
+                    RETRY_MEASURE_MAX,
+                    BASE_DELAY_MEASURE,
+                    ct,
+                    Log
+                );
+
+                var measurement = new ZeroMeasurement(zero.Zero_Len, zero.Zero_Db, zero.PeakCount);
+                measurements.Add(measurement);
+
+                var evaluation = ZeroConsistencyEvaluator.Evaluate(measurement, previousEvaluation, lastZeroHistory, options);
+
+                Log.Information(
+                    "Zero consistency attempt {Attempt}/{TotalAttempts}: clientId={ClientId} pos={Position} db={Db} peaks={PeakCount} suspicious={Suspicious} reason={Reason} converged={Converged} accepted={Accepted}",
+                    attempt,
+                    totalAttempts,
+                    clientId,
+                    measurement.SelectedPosition,
+                    measurement.SelectedDb,
+                    measurement.PeakCount,
+                    evaluation.IsSuspicious,
+                    evaluation.SuspiciousReason ?? "",
+                    evaluation.IsConverged,
+                    evaluation.ShouldAccept);
+
+                if (evaluation.ShouldAccept)
+                {
+                    if (attempt > 1)
+                    {
+                        Log.Warning(
+                            "Zero accepted after retest: clientId={ClientId} attempts={Attempts} previousPos={PreviousPos} currentPos={CurrentPos} tolerance={Tolerance}",
+                            clientId,
+                            attempt,
+                            previousEvaluation?.Measurement.SelectedPosition,
+                            measurement.SelectedPosition,
+                            options.ConvergenceToleranceM);
+                    }
+
+                    return new ZeroExecutionOutcome(true, measurement.SelectedPosition, measurement.SelectedDb, attempt, measurements, null);
+                }
+
+                previousEvaluation = evaluation;
+            }
+
+            var summary = string.Join("; ", measurements.Select(static m => $"{m.SelectedPosition:F3}m@{m.PeakCount}pk"));
+            return new ZeroExecutionOutcome(
+                false,
+                -1d,
+                0d,
+                totalAttempts,
+                measurements,
+                $"Zero measurements did not converge: [{summary}]");
+        }
+
         private async Task<ScanExecutionOutcome> ExecutePredictiveScanAsync(int clientId, double zeroLength, CancellationToken ct)
         {
             HourlyResultStore.Instance.TryGetLastScanHistory(clientId, out var lastScanHistory);
@@ -432,6 +510,14 @@ namespace OFDRCentralControlServer.Core
             => double.TryParse(s, out var v) ? v : def;
 
         private sealed record ScanExecutionOutcome(bool Success, double LengthM, double PeakDb, string? Error, int Attempts);
+
+        private sealed record ZeroExecutionOutcome(
+            bool Success,
+            double LengthM,
+            double PeakDb,
+            int Attempts,
+            IReadOnlyList<ZeroMeasurement> Measurements,
+            string? Error);
 
     }
 }

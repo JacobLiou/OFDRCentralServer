@@ -300,6 +300,10 @@ dotnet run -- 5800
 # 发布单文件（win-x64）
 dotnet publish -c Release -r win-x64
 
+# 运行单元测试（xunit，测试项目在 OFDRCentralControlServer.Tests/ 子目录）
+cd OFDRCentralControlServer.Tests
+dotnet test
+
 # 后台无窗口启动（Windows）
 start /b OFDRCentralControlServer.exe >nul 2>&1
 ```
