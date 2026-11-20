@@ -159,7 +159,7 @@ namespace OFDRCentralControlServer.Core
                     }
                     else if (task.Mode.Equals("zero", StringComparison.OrdinalIgnoreCase))
                     {
-                        // 执行归零操作：结果可疑（单峰/无峰/历史跳变）时自动补测对比，连续一致才采纳
+                        // 执行归零：峰数不足等坏帧最多补测 1 次，够峰即直接采纳
                         var zeroOutcome = await ExecuteZeroWithVerificationAsync(task.ClientId, ct);
 
                         if (zeroOutcome.Success)
@@ -332,29 +332,79 @@ namespace OFDRCentralControlServer.Core
             }
         }
 
+        /// <summary>
+        /// 固定策略扫描 + 三峰门禁：峰数不足或长度无效时最多补测 1 次，够峰且 length>0 即采纳。
+        /// </summary>
         private async Task<ScanExecutionOutcome> ExecuteFixedStrategyScanAsync(double zeroLength, CancellationToken ct)
         {
-            var res = await RetryAsync(
-                async () => await _fla.ScanLengthAsync(zeroLength, ct),
-                "scan",
-                RETRY_MEASURE_MAX,
-                BASE_DELAY_MEASURE,
-                ct,
-                Log
-            );
+            var options = _zeroConsistency;
+            var totalAttempts = 1 + Math.Max(0, options.RetestCount);
+            var summaries = new List<string>(totalAttempts);
 
-            if (res.Scan_Len > 0)
+            for (var attempt = 1; attempt <= totalAttempts; attempt++)
             {
-                return new ScanExecutionOutcome(true, res.Scan_Len, res.Scan_Db, null, 1);
+                if (attempt > 1 && options.RetestDelayMs > 0)
+                {
+                    await Task.Delay(options.RetestDelayMs, ct);
+                }
+
+                var res = await RetryAsync(
+                    async () => await _fla.ScanLengthAsync(zeroLength, ct),
+                    "scan",
+                    RETRY_MEASURE_MAX,
+                    BASE_DELAY_MEASURE,
+                    ct,
+                    Log
+                );
+
+                summaries.Add($"{res.Scan_Len:F3}m@{res.PeakCount}pk/{res.Scan_Db:F1}dB");
+
+                var rejection = PeakFrameGate.AssessRejectionReason(
+                    res.PeakCount,
+                    res.PeakDbCount,
+                    res.Scan_Len,
+                    options.MinPeakCount,
+                    windowStartM: null,
+                    windowEndM: null,
+                    requirePositiveSelectedValue: true);
+
+                Log.Information(
+                    "Scan peak-gate attempt {Attempt}/{TotalAttempts}: length={Length} db={Db} peaks={PeakCount}/{PeakDbCount} rejected={Rejected} reason={Reason}",
+                    attempt,
+                    totalAttempts,
+                    res.Scan_Len,
+                    res.Scan_Db,
+                    res.PeakCount,
+                    res.PeakDbCount,
+                    rejection != null,
+                    rejection ?? "");
+
+                if (rejection == null)
+                {
+                    if (attempt > 1)
+                    {
+                        Log.Warning(
+                            "Scan accepted after retest: attempts={Attempts} length={Length} peaks={PeakCount}",
+                            attempt,
+                            res.Scan_Len,
+                            res.PeakCount);
+                    }
+
+                    return new ScanExecutionOutcome(true, res.Scan_Len, res.Scan_Db, null, attempt);
+                }
             }
 
-            return new ScanExecutionOutcome(false, res.Scan_Len, res.Scan_Db, "FLA scan error reuslt < 0", 1);
+            return new ScanExecutionOutcome(
+                false,
+                -1d,
+                0d,
+                $"Scan insufficient peaks after retest: [{string.Join("; ", summaries)}]",
+                totalAttempts);
         }
 
         /// <summary>
-        /// 归零测量 + 一致性验证：
-        /// 首次测量结果可疑（峰数量不足、无峰、与该通道最近一次成功归零跳变过大）时自动补测，
-        /// 连续两次不可疑且选中峰位置差在容差内才采纳；超过补测次数仍不收敛则返回失败并附上各次测量值。
+        /// 归零测量 + 三峰门禁：
+        /// 首次坏帧（峰数量不足、无峰、数量不齐、越窗）时最多补测 1 次；下一次够峰即直接采纳。
         /// </summary>
         private async Task<ZeroExecutionOutcome> ExecuteZeroWithVerificationAsync(int clientId, CancellationToken ct)
         {
@@ -405,12 +455,12 @@ namespace OFDRCentralControlServer.Core
                     if (attempt > 1)
                     {
                         Log.Warning(
-                            "Zero accepted after retest: clientId={ClientId} attempts={Attempts} previousPos={PreviousPos} currentPos={CurrentPos} tolerance={Tolerance}",
+                            "Zero accepted after retest: clientId={ClientId} attempts={Attempts} previousPos={PreviousPos} currentPos={CurrentPos} peaks={PeakCount}",
                             clientId,
                             attempt,
                             previousEvaluation?.Measurement.SelectedPosition,
                             measurement.SelectedPosition,
-                            options.ConvergenceToleranceM);
+                            measurement.PeakCount);
                     }
 
                     return new ZeroExecutionOutcome(true, measurement.SelectedPosition, measurement.SelectedDb, attempt, measurements, null);
@@ -426,18 +476,28 @@ namespace OFDRCentralControlServer.Core
                 0d,
                 totalAttempts,
                 measurements,
-                $"Zero measurements did not converge: [{summary}]");
+                $"Zero insufficient peaks after retest: [{summary}]");
         }
 
         private async Task<ScanExecutionOutcome> ExecutePredictiveScanAsync(int clientId, double zeroLength, CancellationToken ct)
         {
             HourlyResultStore.Instance.TryGetLastScanHistory(clientId, out var lastScanHistory);
 
+            var peakGateAttempts = 1 + Math.Max(0, _zeroConsistency.RetestCount);
+            var scoringAttempts = 1 + _scanPredictiveRetestCount;
+            var totalAttempts = Math.Max(peakGateAttempts, scoringAttempts);
+
             PredictiveScanEvaluation? previousAttempt = null;
-            var totalAttempts = 1 + _scanPredictiveRetestCount;
+            var peakSummaries = new List<string>(totalAttempts);
+            string? lastPeakRejection = null;
 
             for (var attempt = 1; attempt <= totalAttempts; attempt++)
             {
+                if (attempt > 1 && _zeroConsistency.RetestDelayMs > 0 && lastPeakRejection != null)
+                {
+                    await Task.Delay(_zeroConsistency.RetestDelayMs, ct);
+                }
+
                 var candidateSet = await RetryAsync(
                     async () => await _fla.GetScanCandidateSetAsync(zeroLength, ct)
                         ?? throw new InvalidOperationException("FLA scan returned no candidate set."),
@@ -447,6 +507,44 @@ namespace OFDRCentralControlServer.Core
                     ct,
                     Log
                 );
+
+                peakSummaries.Add($"{candidateSet.RawPositionsCount}pk/{candidateSet.RawDbCount}db");
+
+                var peakRejection = PeakFrameGate.AssessRejectionReason(
+                    candidateSet.RawPositionsCount,
+                    candidateSet.RawDbCount,
+                    selectedValue: 1d, // 峰数门禁优先；选中值由评分逻辑再校验
+                    _zeroConsistency.MinPeakCount,
+                    windowStartM: null,
+                    windowEndM: null,
+                    requirePositiveSelectedValue: false);
+
+                lastPeakRejection = peakRejection;
+
+                Log.Information(
+                    "Predictive scan peak-gate attempt {Attempt}/{TotalAttempts}: clientId={ClientId} peaks={PeakCount}/{PeakDbCount} rejected={Rejected} reason={Reason}",
+                    attempt,
+                    totalAttempts,
+                    clientId,
+                    candidateSet.RawPositionsCount,
+                    candidateSet.RawDbCount,
+                    peakRejection != null,
+                    peakRejection ?? "");
+
+                if (peakRejection != null)
+                {
+                    if (attempt >= peakGateAttempts)
+                    {
+                        return new ScanExecutionOutcome(
+                            false,
+                            -1d,
+                            0d,
+                            $"Scan insufficient peaks after retest: [{string.Join("; ", peakSummaries)}]",
+                            attempt);
+                    }
+
+                    continue;
+                }
 
                 var evaluation = PredictiveScanSelector.EvaluateCandidates(candidateSet, lastScanHistory, BuildPredictiveScanOptions());
 
@@ -463,6 +561,22 @@ namespace OFDRCentralControlServer.Core
                     evaluation.TriggeredByHistoryJump,
                     evaluation.PositiveCandidateCount
                 );
+
+                if (evaluation.Best.Candidate.DeltaFromZero <= 0)
+                {
+                    lastPeakRejection = "no peak found";
+                    if (attempt >= peakGateAttempts)
+                    {
+                        return new ScanExecutionOutcome(
+                            false,
+                            evaluation.Best.Candidate.DeltaFromZero,
+                            evaluation.Best.Candidate.Db,
+                            $"Scan insufficient peaks after retest: [{string.Join("; ", peakSummaries)}]",
+                            attempt);
+                    }
+
+                    continue;
+                }
 
                 if (!evaluation.IsLowConfidence)
                 {
@@ -484,6 +598,7 @@ namespace OFDRCentralControlServer.Core
                 }
 
                 previousAttempt = evaluation;
+                lastPeakRejection = null;
             }
 
             var reason = previousAttempt == null

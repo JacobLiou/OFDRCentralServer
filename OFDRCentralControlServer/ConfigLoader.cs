@@ -72,14 +72,14 @@ namespace OFDRCentralControlServer
         public double ScanPredictiveTailPreferenceWeight { get; set; } = 12.0;
 
         /// <summary>
-        /// 归零最小峰数：设备回复峰数量低于该值视为可疑帧（单峰即异常），触发补测对比。
+        /// 归零/扫描最小峰数：设备回复峰数量低于该值视为坏帧（正常至少三峰），触发最多一次补测。
         /// </summary>
-        public int ZeroMinPeakCount { get; set; } = 2;
+        public int ZeroMinPeakCount { get; set; } = 3;
 
         /// <summary>
-        /// 归零补测次数：首次结果可疑时，最多额外补测的次数。
+        /// 归零/扫描补测次数：首次结果为坏帧时，最多额外补测的次数（默认 1，避免拉长超时）。
         /// </summary>
-        public int ZeroRetestCount { get; set; } = 2;
+        public int ZeroRetestCount { get; set; } = 1;
 
         /// <summary>
         /// 归零收敛容差（米）：连续两次归零选中峰位置差在该值内视为一致，可采纳。

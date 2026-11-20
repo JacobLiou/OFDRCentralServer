@@ -159,7 +159,7 @@ namespace OFDRCentralControlServer.Devices
         /// <param name="lengthRange_m"></param>
         /// <returns></returns>
         /// <exception cref="InvalidOperationException"></exception>
-        public async Task<(double Scan_Len, double Scan_Db)> ScanLengthAsync(
+        public async Task<(double Scan_Len, double Scan_Db, int PeakCount, int PeakDbCount)> ScanLengthAsync(
             double zeroLength_m,            // 上一步归零得到的基准线长
             CancellationToken ct
         )
@@ -167,7 +167,7 @@ namespace OFDRCentralControlServer.Devices
             var candidateSet = await GetScanCandidateSetAsync(zeroLength_m, ct);
             if (candidateSet == null || candidateSet.Candidates.Count == 0)
             {
-                return (-1d, 0d);
+                return (-1d, 0d, candidateSet?.RawPositionsCount ?? 0, candidateSet?.RawDbCount ?? 0);
             }
 
             // 代表产品端点的峰：采用距离最大（如需按 dB 选择，可改成幅值最大）
@@ -211,7 +211,7 @@ namespace OFDRCentralControlServer.Devices
                 );
             }
 
-            return (productLen, productDb);
+            return (productLen, productDb, candidateSet.RawPositionsCount, candidateSet.RawDbCount);
         }
 
         public async Task<ScanCandidateSet?> GetScanCandidateSetAsync(double zeroLength_m, CancellationToken ct)
